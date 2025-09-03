@@ -1,0 +1,6 @@
+@Galileu.API_HostAddress = http://localhost:5225
+
+GET {{Galileu.API_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

@@ -1,0 +1,6 @@
+@Galileu.ModelBase_HostAddress = http://localhost:5159
+
+GET {{Galileu.ModelBase_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
