@@ -16,6 +16,10 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Galileu.Core", "Galileu.Cor
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Galileu.Brain", "Galileu.Brain\Galileu.Brain.csproj", "{C9933CAA-ABDE-484B-86F7-A91427983BA0}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Galileu.Services", "Galileu.Services\Galileu.Services.csproj", "{88031F07-39C0-4326-BC05-EC727ED55F5C}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Galileu.Models", "Galileu.Models\Galileu.Models.csproj", "{8143B246-4383-4F27-8862-AB72989BB9EF}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -54,5 +58,13 @@ Global
 		{C9933CAA-ABDE-484B-86F7-A91427983BA0}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{C9933CAA-ABDE-484B-86F7-A91427983BA0}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{C9933CAA-ABDE-484B-86F7-A91427983BA0}.Release|Any CPU.Build.0 = Release|Any CPU
+		{88031F07-39C0-4326-BC05-EC727ED55F5C}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{88031F07-39C0-4326-BC05-EC727ED55F5C}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{88031F07-39C0-4326-BC05-EC727ED55F5C}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{88031F07-39C0-4326-BC05-EC727ED55F5C}.Release|Any CPU.Build.0 = Release|Any CPU
+		{8143B246-4383-4F27-8862-AB72989BB9EF}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{8143B246-4383-4F27-8862-AB72989BB9EF}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{8143B246-4383-4F27-8862-AB72989BB9EF}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{8143B246-4383-4F27-8862-AB72989BB9EF}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal

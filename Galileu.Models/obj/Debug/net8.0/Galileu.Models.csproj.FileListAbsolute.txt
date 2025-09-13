@@ -1,0 +1,13 @@
+/home/mplopes/Documentos/GitHub/Galileu.AI/Galileu.Models/bin/Debug/net8.0/Galileu.Models.deps.json
+/home/mplopes/Documentos/GitHub/Galileu.AI/Galileu.Models/bin/Debug/net8.0/Galileu.Models.dll
+/home/mplopes/Documentos/GitHub/Galileu.AI/Galileu.Models/bin/Debug/net8.0/Galileu.Models.pdb
+/home/mplopes/Documentos/GitHub/Galileu.AI/Galileu.Models/obj/Debug/net8.0/Galileu.Models.csproj.AssemblyReference.cache
+/home/mplopes/Documentos/GitHub/Galileu.AI/Galileu.Models/obj/Debug/net8.0/Galileu.Models.GeneratedMSBuildEditorConfig.editorconfig
+/home/mplopes/Documentos/GitHub/Galileu.AI/Galileu.Models/obj/Debug/net8.0/Galileu.Models.AssemblyInfoInputs.cache
+/home/mplopes/Documentos/GitHub/Galileu.AI/Galileu.Models/obj/Debug/net8.0/Galileu.Models.AssemblyInfo.cs
+/home/mplopes/Documentos/GitHub/Galileu.AI/Galileu.Models/obj/Debug/net8.0/Galileu.Models.csproj.CoreCompileInputs.cache
+/home/mplopes/Documentos/GitHub/Galileu.AI/Galileu.Models/obj/Debug/net8.0/Galileu.Models.sourcelink.json
+/home/mplopes/Documentos/GitHub/Galileu.AI/Galileu.Models/obj/Debug/net8.0/Galileu.Models.dll
+/home/mplopes/Documentos/GitHub/Galileu.AI/Galileu.Models/obj/Debug/net8.0/refint/Galileu.Models.dll
+/home/mplopes/Documentos/GitHub/Galileu.AI/Galileu.Models/obj/Debug/net8.0/Galileu.Models.pdb
+/home/mplopes/Documentos/GitHub/Galileu.AI/Galileu.Models/obj/Debug/net8.0/ref/Galileu.Models.dll

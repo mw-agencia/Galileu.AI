@@ -7,7 +7,15 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="Akka" Version="1.5.49" />
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="9.0.5" />
+    <PackageReference Include="Swashbuckle.AspNetCore" Version="9.0.4" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Galileu.Controller\Galileu.Controller.csproj" />
+    <ProjectReference Include="..\Galileu.Models\Galileu.Models.csproj" />
+    <ProjectReference Include="..\Galileu.Services\Galileu.Services.csproj" />
   </ItemGroup>
 
 </Project>
