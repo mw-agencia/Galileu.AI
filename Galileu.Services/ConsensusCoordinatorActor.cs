@@ -14,7 +14,7 @@ public class ConsensusCoordinatorActor : ReceiveActor
     
     // --- Estado da Rodada de Consenso Atual ---
     private Guid _currentTaskId;
-    private IActorRef _worker;
+    private IActorRef? _worker;
     private int _totalSubtasks;
     private List<IActorRef> _participatingNodes = new();
     

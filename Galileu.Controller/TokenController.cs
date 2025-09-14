@@ -1,12 +1,7 @@
-using System.IdentityModel.Tokens.Jwt;
-using Galileu.Models;
 using Galileu.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using System.Security.Claims;
-using System.Text;
-using System.Threading.Tasks;
-using Microsoft.IdentityModel.Tokens; // Adicionado
 
 namespace Galileu.API.Controllers;
 
@@ -65,12 +60,6 @@ public class TokenController : ControllerBase
 
         try
         {
-            // Chama o RewardContractService para emitir novos tokens.
-            // Simulamos um "score" que resulta na quantidade de tokens desejada.
-            // Se a regra é 'score * 10', então passamos 'amount / 10'.
-            // Ou, de forma mais direta, podemos criar uma função de mint direto. Vamos fazer isso.
-        
-            // Vamos adicionar uma função de mint direto no RewardContractService para clareza.
             await _rewardContract.MintTokensAsync(request.ToAddress, request.Amount, "Test Mint");
 
             var newBalance = await _walletService.GetBalanceAsync(request.ToAddress);

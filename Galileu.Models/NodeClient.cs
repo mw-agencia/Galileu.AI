@@ -11,42 +11,37 @@ public class NodeClient : IDisposable
     // O dicionário agora armazena uma Task<ClientWebSocket> para gerenciar a conexão.
     private readonly ConcurrentDictionary<string, ClientWebSocket> _sockets = new();
     private readonly ConcurrentDictionary<Guid, TaskCompletionSource<Message>> _pendingRequests = new();
+    private readonly PolymorphicTypeResolver _typeResolver;
+    private readonly JsonSerializerOptions _jsonOptions;
+
+    public NodeClient(PolymorphicTypeResolver typeResolver)
+    {
+        _typeResolver = typeResolver;
+        _jsonOptions = new JsonSerializerOptions { TypeInfoResolver = _typeResolver };
+    }
 
     public async Task<TResponse> SendRequestAsync<TResponse>(string targetAddress, Message request, CancellationToken token) where TResponse : Message
     {
-        var wsUrl = targetAddress.Replace("http://", "ws://").Replace("https://", "wss://") + "/ws";
-        
-        // --- INÍCIO DA CORREÇÃO ---
-        // Obtém o socket do cache. Se não existir ou se estiver em um estado inválido,
-        // ele será removido e uma nova tentativa de conexão será feita.
-        if (!_sockets.TryGetValue(wsUrl, out var ws) || ws.State != WebSocketState.Open)
-        {
-            // Remove o socket antigo/falho se ele existir
-            if (ws != null)
-            {
-                _sockets.TryRemove(wsUrl, out _);
-                ws.Dispose();
-            }
+        // Usa um ClientWebSocket por requisição para máxima robustez.
+        using var ws = new ClientWebSocket();
+        var wsUrl = new Uri(targetAddress.Replace("http://", "ws://").Replace("https://", "wss://") + "/ws");
 
-            // Cria um novo socket e tenta conectar
-            ws = new ClientWebSocket();
-            await ws.ConnectAsync(new Uri(wsUrl), token);
-            
-            // Armazena o novo socket funcional e inicia o loop de recebimento
-            _sockets[wsUrl] = ws;
-            _ = ReceiveLoop(ws, wsUrl); 
-        }
-        // --- FIM DA CORREÇÃO ---
-        
-        var tcs = new TaskCompletionSource<Message>();
-        _pendingRequests[request.CorrelationId] = tcs;
+        // Conecta ao servidor
+        await ws.ConnectAsync(wsUrl, token);
 
-        var jsonMessage = JsonSerializer.Serialize(request, request.GetType(), new JsonSerializerOptions { TypeInfoResolver = new PolymorphicTypeResolver() }); // Adicionado resolver para garantir polimorfismo
+        // Envia a mensagem
+        var jsonMessage = JsonSerializer.Serialize(request, _jsonOptions);
         var buffer = Encoding.UTF8.GetBytes(jsonMessage);
         await ws.SendAsync(new ArraySegment<byte>(buffer), WebSocketMessageType.Text, true, token);
 
-        var responseMessage = await tcs.Task.WaitAsync(TimeSpan.FromSeconds(10), token);
-        return (TResponse)responseMessage;
+        // Aguarda a resposta
+        var receiveBuffer = new byte[1024 * 4];
+        var result = await ws.ReceiveAsync(new ArraySegment<byte>(receiveBuffer), token);
+
+        var jsonResponse = Encoding.UTF8.GetString(receiveBuffer, 0, result.Count);
+        var responseMessage = JsonSerializer.Deserialize<Message>(jsonResponse, _jsonOptions);
+
+        return (TResponse)responseMessage!;
     }
 
     private async Task ReceiveLoop(ClientWebSocket ws, string url)

@@ -14,11 +14,14 @@ var myAddress = $"http://localhost:{port}";
 
 builder.WebHost.UseUrls(myAddress);
 
+var typeResolver = new PolymorphicTypeResolver();
+
 // --- Registro dos Serviços (Forma correta e sem duplicatas) ---
 builder.Services.Configure<MongoDbSettings>(builder.Configuration.GetSection("MongoDbSettings"));
 builder.Services.AddSingleton(new NodeState(myAddress)); // Usa o NodeState da versão Gossip
 builder.Services.AddSingleton<NodeClient>();
 builder.Services.AddSingleton<PolymorphicTypeResolver>();
+builder.Services.AddSingleton(typeResolver);
 builder.Services.AddSingleton<WalletService>();
 builder.Services.AddSingleton<RewardContractService>();
 builder.Services.AddSingleton<NodeRegistryService>();
@@ -87,7 +90,49 @@ app.MapGet("/", () => $"Galileu P2P Node (Gossip Protocol) is running at {myAddr
 
 app.MapGet("/ws", async (HttpContext context, PolymorphicTypeResolver typeResolver, NodeState state, NodeClient client) =>
 {
-    // ... (A lógica do loop do WebSocket permanece a mesma) ...
+    if (context.WebSockets.IsWebSocketRequest)
+    {
+        using var ws = await context.WebSockets.AcceptWebSocketAsync();
+        Console.WriteLine($"[Server] WebSocket connection established from {context.Connection.RemoteIpAddress}.");
+        
+        // --- INÍCIO DA CORREÇÃO DE RESILIÊNCIA ---
+        try
+        {
+            var buffer = new byte[1024 * 4];
+            while (ws.State == WebSocketState.Open)
+            {
+                var result = await ws.ReceiveAsync(new ArraySegment<byte>(buffer), CancellationToken.None);
+                if (result.MessageType == WebSocketMessageType.Close)
+                {
+                    await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "Closing", CancellationToken.None);
+                    break;
+                }
+
+                var jsonMessage = Encoding.UTF8.GetString(buffer, 0, result.Count);
+                // ... (resto da sua lógica de desserialização e HandleMessage)
+            }
+        }
+        catch (WebSocketException ex) when (ex.WebSocketErrorCode == WebSocketError.ConnectionClosedPrematurely)
+        {
+            // Captura a exceção específica de fechamento abrupto e a trata como um evento normal.
+            Console.WriteLine($"[Server] WebSocket connection closed abruptly by {context.Connection.RemoteIpAddress}.");
+        }
+        catch (Exception ex)
+        {
+            // Captura quaisquer outras exceções inesperadas
+            Console.WriteLine($"[Server] An unexpected error occurred in the WebSocket loop: {ex.Message}");
+        }
+        finally
+        {
+            Console.WriteLine($"[Server] WebSocket connection finished for {context.Connection.RemoteIpAddress}.");
+            ws.Dispose();
+        }
+        // --- FIM DA CORREÇÃO DE RESILIÊNCIA ---
+    }
+    else
+    {
+        context.Response.StatusCode = 400;
+    }
 });
 
 // --- Lógica do HandleMessage ATUALIZADA para Gossip ---
@@ -98,19 +143,19 @@ async Task<Message?> HandleMessage(Message? receivedMessage, NodeState state, No
         // Este continua relevante para monitoramento
         case PingRequest ping:
             Console.WriteLine($"[Server] Received ping from {ping.FromNodeId}.");
-            return new PongResponse(ping.CorrelationId, $"Pong from {state.Id}");
+            return await Task.FromResult<Message?>(new PongResponse(ping.CorrelationId, $"Pong from {state.Id}"));
 
         // NOVO: Handler para o protocolo Gossip
         case GossipSyncRequest gossipRequest:
             state.MergePeers(gossipRequest.KnownPeers);
             var ourPeers = state.GetKnownPeers();
-            return new GossipSyncResponse(gossipRequest.CorrelationId, ourPeers);
+            return await Task.FromResult<Message?>(new GossipSyncResponse(gossipRequest.CorrelationId, ourPeers));
             
         // REMOVIDO: Os handlers para JoinRequest e ForwardJoinRequest foram removidos por serem obsoletos.
             
         default:
             Console.WriteLine($"[Server] Received message of unhandled type: {receivedMessage?.GetType().Name}.");
-            return null;
+            return await Task.FromResult<Message?>(null);
     }
 }
 

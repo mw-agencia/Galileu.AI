@@ -8,7 +8,7 @@ public class SpecializedNodeActor : ReceiveActor
     private readonly NodeRegistryService _registryService;
     private readonly IEnumerable<string> _specializations;
     private readonly string _nodeId;
-    private readonly string _myWalletAddress; // Cada nó tem sua própria carteira
+    private readonly string _myWalletAddress;
 
     public SpecializedNodeActor(IEnumerable<string> specializations, NodeRegistryService registryService)
     {

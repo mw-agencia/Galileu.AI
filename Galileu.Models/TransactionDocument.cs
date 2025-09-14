@@ -7,24 +7,24 @@ public class TransactionDocument
 {
     [BsonId]
     [BsonRepresentation(BsonType.ObjectId)]
-    public string Id { get; set; }
+    public string Id { get; set; } = null!;
 
     [BsonElement("fromAddress")]
-    public string FromAddress { get; set; }
+    public string fromAddress { get; set; } = null!;
 
     [BsonElement("toAddress")]
-    public string ToAddress { get; set; }
+    public string toAddress { get; set; } = null!;
 
     [BsonElement("amount")]
-    [BsonRepresentation(BsonType.Decimal128)] // Usar Decimal128 para precisão financeira
-    public decimal Amount { get; set; }
+    [BsonRepresentation(BsonType.Decimal128)]
+    public decimal amount { get; set; }
 
     [BsonElement("timestamp")]
-    public DateTime Timestamp { get; set; }
+    public DateTime timestamp { get; set; }
 
     [BsonElement("notes")]
-    public string? Notes { get; set; }
+    public string? notes { get; set; } = null!;
 
     [BsonElement("hash")]
-    public string Hash { get; set; }
+    public string hash { get; set; } = null!;
 }

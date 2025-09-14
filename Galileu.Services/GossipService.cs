@@ -21,49 +21,62 @@ public class GossipService : IHostedService, IDisposable
 
     public Task StartAsync(CancellationToken cancellationToken)
     {
-        _logger.LogInformation("Gossip Service is starting.");
-        // Inicia o timer para fofocar a cada 10 segundos com um atraso inicial.
+        _logger.LogInformation("Gossip Service is starting. Will attempt to gossip every 10 seconds.");
+        // O timer começa após 5 segundos e repete a cada 10 segundos.
         _timer = new Timer(DoGossip, null, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(10));
         return Task.CompletedTask;
     }
 
     private async void DoGossip(object? state)
     {
+        var knownPeers = _nodeState.GetKnownPeers();
+        var otherPeers = knownPeers.Where(p => p != _nodeState.Address).ToList();
+
+        if (!otherPeers.Any())
+        {
+            // Se só conhecemos a nós mesmos, não há com quem fofocar.
+            // Isso é um estado normal e esperado para um nó novo ou para o primeiro nó da rede.
+            return;
+        }
+        
+        var targetPeerAddress = otherPeers[_random.Next(otherPeers.Count)];
+
         try
         {
-            var knownPeers = _nodeState.GetKnownPeers();
-            // Não fofocamos com nós mesmos.
-            var otherPeers = knownPeers.Where(p => p != _nodeState.Address).ToList();
-
-            if (!otherPeers.Any())
-            {
-                //_logger.LogInformation("No other peers to gossip with yet.");
-                return;
-            }
-
-            // Seleciona um par aleatório para fofocar.
-            var targetPeerAddress = otherPeers[_random.Next(otherPeers.Count)];
-
-            _logger.LogInformation("Gossiping with peer: {TargetPeer}", targetPeerAddress);
+            _logger.LogInformation("Attempting to gossip with peer: {TargetPeer}", targetPeerAddress);
 
             var request = new GossipSyncRequest(Guid.NewGuid(), knownPeers);
             
-            // Envia nossa lista e recebe a lista do par em troca.
+            // --- INÍCIO DA CORREÇÃO ---
+
+            // 1. Adicionamos um CancellationToken com timeout.
+            //    Isso evita que a tarefa fique pendurada indefinidamente se o outro nó não responder.
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            
             var response = await _nodeClient.SendRequestAsync<GossipSyncResponse>(
                 targetPeerAddress, 
                 request, 
-                CancellationToken.None // Use CancellationToken com timeout em produção
+                cts.Token // Passamos o token com timeout
             );
 
-            // Mescla a lista de pares recebida com a nossa.
-            _nodeState.MergePeers(response.KnownPeers);
+            // --- FIM DA CORREÇÃO ---
 
-            _logger.LogInformation("Gossip successful. Total known peers: {PeerCount}", _nodeState.GetKnownPeers().Count);
+            _nodeState.MergePeers(response.KnownPeers);
+            _logger.LogInformation("Gossip with {TargetPeer} successful. Total known peers: {PeerCount}", targetPeerAddress, _nodeState.GetKnownPeers().Count);
             _nodeState.PrintStatus();
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to gossip with a peer.");
+            // --- INÍCIO DA CORREÇÃO ---
+
+            // 2. Tornamos o log de erro mais informativo.
+            _logger.LogWarning(
+                "Failed to gossip with peer {TargetPeer}. Reason: {ErrorType} - {ErrorMessage}. Will retry on the next cycle.", 
+                targetPeerAddress, 
+                ex.GetType().Name, 
+                ex.Message);
+            
+            // --- FIM DA CORREÇÃO ---
         }
     }
 

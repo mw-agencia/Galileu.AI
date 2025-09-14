@@ -15,11 +15,29 @@ public class WalletService
     public WalletService(IOptions<MongoDbSettings> mongoSettings, ILogger<WalletService> logger)
     {
         _logger = logger;
-        var client = new MongoClient(mongoSettings.Value.ConnectionString);
-        var database = client.GetDatabase(mongoSettings.Value.DatabaseName);
+
+        // --- LOGS DE DEPURAÇÃO ---
+        var connectionString = mongoSettings.Value.ConnectionString;
+        var databaseName = mongoSettings.Value.DatabaseName;
+    
+        _logger.LogInformation("--- WalletService CONSTRUCTOR ---");
+        _logger.LogInformation("ConnectionString: {ConnStr}", connectionString);
+        _logger.LogInformation("DatabaseName: {DbName}", databaseName);
+
+        if (string.IsNullOrEmpty(connectionString) || string.IsNullOrEmpty(databaseName))
+        {
+            _logger.LogCritical("CONFIGURAÇÃO DO MONGODB ESTÁ FALTANDO! Verifique o appsettings.json.");
+            throw new ArgumentNullException("A configuração do MongoDB não foi carregada.");
+        }
+        // --- FIM DOS LOGS DE DEPURAÇÃO ---
+
+        var client = new MongoClient(connectionString);
+        var database = client.GetDatabase(databaseName);
 
         _transactions = database.GetCollection<TransactionDocument>("Transactions");
         _wallets = database.GetCollection<WalletDocument>("Wallets");
+    
+        _logger.LogInformation("WalletService conectado ao MongoDB com sucesso.");
     }
     
     // Método para criar e armazenar uma nova carteira
@@ -47,51 +65,170 @@ public class WalletService
 
         var transaction = new TransactionDocument
         {
-            Timestamp = DateTime.UtcNow,
-            FromAddress = fromAddress,
-            ToAddress = toAddress,
-            Amount = amount,
-            Notes = notes,
-            Hash = CryptoUtils.CreateTransactionHash(Guid.NewGuid(), DateTime.UtcNow, fromAddress, toAddress, amount)
+            timestamp = DateTime.UtcNow,
+            fromAddress = fromAddress,
+            toAddress = toAddress,
+            amount = amount,
+            notes = notes,
+            hash = CryptoUtils.CreateTransactionHash(Guid.NewGuid(), DateTime.UtcNow, fromAddress, toAddress, amount)
         };
 
         await _transactions.InsertOneAsync(transaction);
         _logger.LogInformation("Transação de {Amount} de {From} para {To} registrada no MongoDB.", amount, fromAddress, toAddress);
     }
     
+    private string NormalizeWalletAddress(string walletAddress)
+    {
+        if (string.IsNullOrWhiteSpace(walletAddress))
+            return string.Empty;
+
+        // Corrige espaços que vieram de '+'
+        string corrected = walletAddress.Replace(" ", "+");
+
+        // Decodifica caracteres URL (%2F -> /, %2B -> +)
+        string decoded = System.Web.HttpUtility.UrlDecode(corrected);
+
+        return decoded;
+    }
+    
     public async Task<decimal> GetBalanceAsync(string walletAddress)
     {
-        // Usamos o poderoso Aggregation Framework do MongoDB para calcular o saldo
-        var receivedTask = _transactions.AsQueryable()
-            .Where(t => t.ToAddress == walletAddress)
-            .SumAsync(t => t.Amount);
+        try
+        {
+            var receivedTask = _transactions.AsQueryable()
+                .Where(t => t.toAddress == walletAddress)
+                .SumAsync(t => t.amount);
 
-        var sentTask = _transactions.AsQueryable()
-            .Where(t => t.FromAddress == walletAddress)
-            .SumAsync(t => t.Amount);
+            var sentTask = _transactions.AsQueryable()
+                .Where(t => t.fromAddress == walletAddress)
+                .SumAsync(t => t.amount);
+                
+            await Task.WhenAll(receivedTask, sentTask);
+
+            var balance = receivedTask.Result - sentTask.Result;
             
-        await Task.WhenAll(receivedTask, sentTask);
+            _logger.LogDebug("Saldo calculado para carteira (hash: {Hash}): Recebido={Received}, Enviado={Sent}, Saldo={Balance}", 
+                walletAddress.GetHashCode(), receivedTask.Result, sentTask.Result, balance);
 
-        return receivedTask.Result - sentTask.Result;
+            return balance;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Erro ao calcular saldo da carteira (hash: {Hash})", walletAddress.GetHashCode());
+            throw;
+        }
     }
 
     public async Task<IEnumerable<TransactionDocument>> GetHistoryAsync(string walletAddress)
     {
-        var filter = Builders<TransactionDocument>.Filter.Or(
-            Builders<TransactionDocument>.Filter.Eq(t => t.FromAddress, walletAddress),
-            Builders<TransactionDocument>.Filter.Eq(t => t.ToAddress, walletAddress)
-        );
+        try
+        {
+            var filter = Builders<TransactionDocument>.Filter.Or(
+                Builders<TransactionDocument>.Filter.Eq(t => t.fromAddress, walletAddress),
+                Builders<TransactionDocument>.Filter.Eq(t => t.toAddress, walletAddress)
+            );
 
-        return await _transactions.Find(filter)
-            .SortByDescending(t => t.Timestamp)
-            .ToListAsync();
+            var transactions = await _transactions.Find(filter)
+                .SortByDescending(t => t.timestamp)
+                .ToListAsync();
+
+            _logger.LogDebug("Histórico obtido para carteira (hash: {Hash}): {Count} transações", 
+                walletAddress.GetHashCode(), transactions.Count);
+
+            return transactions;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Erro ao obter histórico da carteira (hash: {Hash})", walletAddress.GetHashCode());
+            throw;
+        }
+    }
+    /// <summary>
+    /// Obtém o número total de transações de uma carteira
+    /// </summary>
+    public async Task<int> GetTransactionCountAsync(string walletAddress)
+    {
+        try
+        {
+            var filter = Builders<TransactionDocument>.Filter.Or(
+                Builders<TransactionDocument>.Filter.Eq(t => t.fromAddress, walletAddress),
+                Builders<TransactionDocument>.Filter.Eq(t => t.toAddress, walletAddress)
+            );
+
+            var count = (int)await _transactions.CountDocumentsAsync(filter);
+
+            _logger.LogDebug("Contagem de transações para carteira (hash: {Hash}): {Count}", 
+                walletAddress.GetHashCode(), count);
+
+            return count;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Erro ao contar transações da carteira (hash: {Hash})", walletAddress.GetHashCode());
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Verifica se uma carteira existe
+    /// </summary>
+    public async Task<bool> WalletExistsAsync(string walletAddress)
+    {
+        try
+        {
+            var wallet = await _wallets.Find(w => w.Address == walletAddress).FirstOrDefaultAsync();
+            var exists = wallet != null;
+
+            _logger.LogDebug("Verificação de existência da carteira (hash: {Hash}): {Exists}", 
+                walletAddress.GetHashCode(), exists);
+
+            return exists;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Erro ao verificar existência da carteira (hash: {Hash})", walletAddress.GetHashCode());
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Obtém informações básicas da carteira
+    /// </summary>
+    public async Task<WalletDocument?> GetWalletInfoAsync(string walletAddress)
+    {
+        try
+        {
+            var wallet = await _wallets.Find(w => w.Address == walletAddress).FirstOrDefaultAsync();
+
+            _logger.LogDebug("Informações da carteira obtidas (hash: {Hash}): {Found}", 
+                walletAddress.GetHashCode(), wallet != null);
+
+            return wallet;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Erro ao obter informações da carteira (hash: {Hash})", walletAddress.GetHashCode());
+            throw;
+        }
     }
     
     public async Task<IEnumerable<TransactionDocument>> GetFullLedgerAsync()
     {
-        // Retorna todas as transações, ordenadas pela mais recente primeiro
-        return await _transactions.Find(_ => true)
-            .SortByDescending(t => t.Timestamp)
-            .ToListAsync();
+        try
+        {
+            // Retorna todas as transações, ordenadas pela mais recente primeiro
+            var transactions = await _transactions.Find(_ => true)
+                .SortByDescending(t => t.timestamp)
+                .ToListAsync();
+
+            _logger.LogDebug("Ledger completo obtido: {Count} transações", transactions.Count);
+
+            return transactions;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Erro ao obter ledger completo");
+            throw;
+        }
     }
 }

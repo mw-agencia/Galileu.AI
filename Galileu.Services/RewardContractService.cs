@@ -58,7 +58,7 @@ public class RewardContractService
     public async Task MintTokensAsync(string toAddress, decimal amount, string reason)
     {
         // Cria a transação de "mint"
-        await _walletService.CreateTransactionAsync(SystemMintAddress, toAddress, amount, $"Mint: {reason}");
+        await _walletService.CreateTransactionAsync(SystemMintAddress, toAddress, amount, $"GLU: {reason}");
 
         // Atualiza a oferta total de forma thread-safe
         lock (_lock)

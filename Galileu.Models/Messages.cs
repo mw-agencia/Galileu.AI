@@ -18,6 +18,8 @@ namespace Galileu.Models;
 [JsonDerivedType(typeof(ForwardJoinRequest), typeDiscriminator: "forward_join_request")]
 [JsonDerivedType(typeof(PingRequest), typeDiscriminator: "ping_request")]
 [JsonDerivedType(typeof(PongResponse), typeDiscriminator: "pong_response")]
+[JsonDerivedType(typeof(GossipSyncRequest), typeDiscriminator: "gossip_sync_request")]
+[JsonDerivedType(typeof(GossipSyncResponse), typeDiscriminator: "gossip_sync_response")]
 public abstract record Message(Guid CorrelationId)
 {
     
@@ -34,7 +36,6 @@ public record PongResponse(Guid CorrelationId, string Message) : Message(Correla
 
 // ####################################################################
 // ## MENSAGENS PARA O CONSENSO DE ATORES (Akka.NET)                 ##
-// ## É uma boa prática separá-los, mas podem ficar aqui por enquanto.  ##
 // ####################################################################
 
 // Um nó envia sua lista de pares conhecidos.
