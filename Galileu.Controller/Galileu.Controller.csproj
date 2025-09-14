@@ -17,6 +17,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Galileu.Models\Galileu.Models.csproj" />
+    <ProjectReference Include="..\Galileu.Services\Galileu.Services.csproj" />
   </ItemGroup>
 
 </Project>

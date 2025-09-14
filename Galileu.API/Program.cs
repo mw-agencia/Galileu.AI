@@ -1,13 +1,10 @@
-// Arquivo: Program.cs (Versão final, completa e corrigida)
-
 using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
 using Galileu.Models;
 using Galileu.Services;
-using Microsoft.AspNetCore.Builder; // Necessário para WebApplication
-using Microsoft.Extensions.DependencyInjection; // Necessário para IServiceCollection
-using Microsoft.Extensions.Hosting; // Necessário para IHostBuilder
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.IdentityModel.Tokens; // Necessário para IHostBuilder
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -22,21 +19,47 @@ builder.WebHost.UseUrls(myAddress);
 var nodeState = new NodeState(myAddress);
 var nodeClient = new NodeClient();
 
-// Registro dos serviços da sua aplicação (APENAS UMA VEZ)
-builder.Services.AddSingleton(nodeState);
-builder.Services.AddSingleton(nodeClient);
-builder.Services.AddHostedService<HealthCheckService>();
+// Registro dos serviços da aplicação (APENAS UMA VEZ)
+builder.Services.Configure<MongoDbSettings>(builder.Configuration.GetSection("MongoDbSettings"));
+builder.Services.AddSingleton(new NodeState(myAddress));
+builder.Services.AddSingleton<NodeClient>();
 builder.Services.AddSingleton<PolymorphicTypeResolver>();
+builder.Services.AddSingleton<WalletService>();
+builder.Services.AddSingleton<RewardContractService>();
+builder.Services.AddSingleton<NodeRegistryService>();
+
+// --- Lógica do Akka.NET ---
+// Registra o Hosted Service que vai gerenciar o Akka
+builder.Services.AddHostedService<AkkaHostedService>();
+// Registra um singleton para que possamos acessar o ActorSystem de outros serviços
+builder.Services.AddSingleton<ActorSystemSingleton>();
+
 
 // Serviços para API e Swagger
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+    .AddJwtBearer(options =>
+    {
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuer = true,
+            ValidateAudience = true,
+            ValidateLifetime = true,
+            ValidateIssuerSigningKey = true,
+            ValidIssuer = "GalileuAPI",
+            ValidAudience = "GalileuUsers",
+            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes("SUA_CHAVE_SECRETA_SUPER_LONGA_E_SEGURA_AQUI"))
+        };
+    });
+builder.Services.AddAuthorization();
+
 builder.Services.AddSwaggerGen(options =>
 {
     options.SwaggerDoc("v1", new Microsoft.OpenApi.Models.OpenApiInfo
     {
-        Title = "Galileu.AI Nodes API",
-        Version = "v0.0.0.1",
+        Title = "Galileu P2P Node API",
+        Version = "v1",
         Description = "API para interagir e monitorar um nó na rede distribuída Galileu."
     });
 });

@@ -48,6 +48,10 @@
             "Akka": {
               "target": "Package",
               "version": "[1.5.49, )"
+            },
+            "MongoDB.Driver": {
+              "target": "Package",
+              "version": "[3.5.0, )"
             }
           },
           "imports": [

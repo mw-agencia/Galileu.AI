@@ -49,3 +49,17 @@
 /home/mplopes/Documentos/GitHub/Galileu.AI/Galileu.API/bin/Debug/net9.0/Swashbuckle.AspNetCore.SwaggerUI.dll
 /home/mplopes/Documentos/GitHub/Galileu.AI/Galileu.API/bin/Debug/net9.0/Galileu.Controller.dll
 /home/mplopes/Documentos/GitHub/Galileu.AI/Galileu.API/bin/Debug/net9.0/Galileu.Controller.pdb
+/home/mplopes/Documentos/GitHub/Galileu.AI/Galileu.API/bin/Debug/net9.0/Microsoft.AspNetCore.Authentication.JwtBearer.dll
+/home/mplopes/Documentos/GitHub/Galileu.AI/Galileu.API/bin/Debug/net9.0/Microsoft.IdentityModel.Abstractions.dll
+/home/mplopes/Documentos/GitHub/Galileu.AI/Galileu.API/bin/Debug/net9.0/Microsoft.IdentityModel.JsonWebTokens.dll
+/home/mplopes/Documentos/GitHub/Galileu.AI/Galileu.API/bin/Debug/net9.0/Microsoft.IdentityModel.Logging.dll
+/home/mplopes/Documentos/GitHub/Galileu.AI/Galileu.API/bin/Debug/net9.0/Microsoft.IdentityModel.Protocols.dll
+/home/mplopes/Documentos/GitHub/Galileu.AI/Galileu.API/bin/Debug/net9.0/Microsoft.IdentityModel.Protocols.OpenIdConnect.dll
+/home/mplopes/Documentos/GitHub/Galileu.AI/Galileu.API/bin/Debug/net9.0/Microsoft.IdentityModel.Tokens.dll
+/home/mplopes/Documentos/GitHub/Galileu.AI/Galileu.API/bin/Debug/net9.0/System.IdentityModel.Tokens.Jwt.dll
+/home/mplopes/Documentos/GitHub/Galileu.AI/Galileu.API/bin/Debug/net9.0/DnsClient.dll
+/home/mplopes/Documentos/GitHub/Galileu.AI/Galileu.API/bin/Debug/net9.0/MongoDB.Bson.dll
+/home/mplopes/Documentos/GitHub/Galileu.AI/Galileu.API/bin/Debug/net9.0/MongoDB.Driver.dll
+/home/mplopes/Documentos/GitHub/Galileu.AI/Galileu.API/bin/Debug/net9.0/SharpCompress.dll
+/home/mplopes/Documentos/GitHub/Galileu.AI/Galileu.API/bin/Debug/net9.0/Snappier.dll
+/home/mplopes/Documentos/GitHub/Galileu.AI/Galileu.API/bin/Debug/net9.0/ZstdSharp.dll

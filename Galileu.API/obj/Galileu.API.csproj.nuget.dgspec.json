@@ -59,9 +59,17 @@
               "target": "Package",
               "version": "[1.5.49, )"
             },
+            "Microsoft.AspNetCore.Authentication.JwtBearer": {
+              "target": "Package",
+              "version": "[8.0.0, )"
+            },
             "Microsoft.AspNetCore.OpenApi": {
               "target": "Package",
               "version": "[9.0.5, )"
+            },
+            "MongoDB.Driver": {
+              "target": "Package",
+              "version": "[3.5.0, )"
             },
             "Swashbuckle.AspNetCore": {
               "target": "Package",
@@ -116,6 +124,9 @@
             "projectReferences": {
               "/home/mplopes/Documentos/GitHub/Galileu.AI/Galileu.Models/Galileu.Models.csproj": {
                 "projectPath": "/home/mplopes/Documentos/GitHub/Galileu.AI/Galileu.Models/Galileu.Models.csproj"
+              },
+              "/home/mplopes/Documentos/GitHub/Galileu.AI/Galileu.Services/Galileu.Services.csproj": {
+                "projectPath": "/home/mplopes/Documentos/GitHub/Galileu.AI/Galileu.Services/Galileu.Services.csproj"
               }
             }
           }
@@ -199,6 +210,10 @@
             "Akka": {
               "target": "Package",
               "version": "[1.5.49, )"
+            },
+            "MongoDB.Driver": {
+              "target": "Package",
+              "version": "[3.5.0, )"
             }
           },
           "imports": [
@@ -271,6 +286,12 @@
       "frameworks": {
         "net8.0": {
           "targetAlias": "net8.0",
+          "dependencies": {
+            "Microsoft.AspNetCore.Authentication.JwtBearer": {
+              "target": "Package",
+              "version": "[8.0.0, )"
+            }
+          },
           "imports": [
             "net461",
             "net462",
