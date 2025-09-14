@@ -1,3 +1,4 @@
+// Galileu.Models/NodeClient.cs
 using System.Collections.Concurrent;
 using System.Net.WebSockets;
 using System.Text;
@@ -5,27 +6,42 @@ using System.Text.Json;
 
 namespace Galileu.Models;
 
-
 public class NodeClient : IDisposable
 {
+    // O dicionário agora armazena uma Task<ClientWebSocket> para gerenciar a conexão.
     private readonly ConcurrentDictionary<string, ClientWebSocket> _sockets = new();
     private readonly ConcurrentDictionary<Guid, TaskCompletionSource<Message>> _pendingRequests = new();
 
     public async Task<TResponse> SendRequestAsync<TResponse>(string targetAddress, Message request, CancellationToken token) where TResponse : Message
     {
         var wsUrl = targetAddress.Replace("http://", "ws://").Replace("https://", "wss://") + "/ws";
-        var ws = _sockets.GetOrAdd(wsUrl, _ => new ClientWebSocket());
-
-        if (ws.State != WebSocketState.Open)
+        
+        // --- INÍCIO DA CORREÇÃO ---
+        // Obtém o socket do cache. Se não existir ou se estiver em um estado inválido,
+        // ele será removido e uma nova tentativa de conexão será feita.
+        if (!_sockets.TryGetValue(wsUrl, out var ws) || ws.State != WebSocketState.Open)
         {
+            // Remove o socket antigo/falho se ele existir
+            if (ws != null)
+            {
+                _sockets.TryRemove(wsUrl, out _);
+                ws.Dispose();
+            }
+
+            // Cria um novo socket e tenta conectar
+            ws = new ClientWebSocket();
             await ws.ConnectAsync(new Uri(wsUrl), token);
-            _ = ReceiveLoop(ws, wsUrl); // Inicia o loop de recebimento em background
+            
+            // Armazena o novo socket funcional e inicia o loop de recebimento
+            _sockets[wsUrl] = ws;
+            _ = ReceiveLoop(ws, wsUrl); 
         }
+        // --- FIM DA CORREÇÃO ---
         
         var tcs = new TaskCompletionSource<Message>();
         _pendingRequests[request.CorrelationId] = tcs;
 
-        var jsonMessage = JsonSerializer.Serialize(request, request.GetType());
+        var jsonMessage = JsonSerializer.Serialize(request, request.GetType(), new JsonSerializerOptions { TypeInfoResolver = new PolymorphicTypeResolver() }); // Adicionado resolver para garantir polimorfismo
         var buffer = Encoding.UTF8.GetBytes(jsonMessage);
         await ws.SendAsync(new ArraySegment<byte>(buffer), WebSocketMessageType.Text, true, token);
 
@@ -52,10 +68,17 @@ public class NodeClient : IDisposable
                 }
             }
         }
-        catch (Exception)
+        catch (WebSocketException)
         {
-            // Ocorreu um erro, remover o socket do pool.
-            _sockets.TryRemove(url, out _);
+            // A conexão foi perdida, o socket será removido.
+        }
+        finally
+        {
+            // Garante que o socket falho seja removido do cache
+            if (_sockets.TryRemove(url, out var staleSocket))
+            {
+                staleSocket.Dispose();
+            }
         }
     }
 

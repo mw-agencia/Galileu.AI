@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("Galileu.Services")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+208d19872645827902a5589f285804ae861e7806")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+af4546dd61c4f6b77547e7a134da39a39fad7ad0")]
 [assembly: System.Reflection.AssemblyProductAttribute("Galileu.Services")]
 [assembly: System.Reflection.AssemblyTitleAttribute("Galileu.Services")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

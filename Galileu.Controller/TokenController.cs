@@ -1,19 +1,24 @@
+using System.IdentityModel.Tokens.Jwt;
 using Galileu.Models;
 using Galileu.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using System.Security.Claims;
-using System.Threading.Tasks; // Adicionado
+using System.Text;
+using System.Threading.Tasks;
+using Microsoft.IdentityModel.Tokens; // Adicionado
 
 namespace Galileu.API.Controllers;
 
 public record PurchaseRequestDto(decimal Amount, string PaymentGatewayToken);
 public record SellRequestDto(decimal Amount);
 public record TransferRequestDto(string ToAddress, decimal Amount);
+public record MintTestTokensRequestDto(string ToAddress, decimal Amount);
+
 
 [ApiController]
 [Route("api/[controller]")]
-[Authorize]
+//[Authorize]
 public class TokenController : ControllerBase
 {
     private readonly WalletService _walletService;
@@ -47,6 +52,39 @@ public class TokenController : ControllerBase
         var newBalance = await _walletService.GetBalanceAsync(userAddress);
         
         return Ok(new { Message = "Compra realizada com sucesso.", NewBalance = newBalance });
+    }
+    
+    [HttpPost("mint-test-tokens")]
+    [AllowAnonymous] // Permite o uso sem token JWT, facilitando o teste inicial
+    public async Task<IActionResult> MintTestTokens([FromBody] MintTestTokensRequestDto request)
+    {
+        if (request.Amount <= 0)
+        {
+            return BadRequest(new { Message = "A quantidade de tokens deve ser positiva." });
+        }
+
+        try
+        {
+            // Chama o RewardContractService para emitir novos tokens.
+            // Simulamos um "score" que resulta na quantidade de tokens desejada.
+            // Se a regra é 'score * 10', então passamos 'amount / 10'.
+            // Ou, de forma mais direta, podemos criar uma função de mint direto. Vamos fazer isso.
+        
+            // Vamos adicionar uma função de mint direto no RewardContractService para clareza.
+            await _rewardContract.MintTokensAsync(request.ToAddress, request.Amount, "Test Mint");
+
+            var newBalance = await _walletService.GetBalanceAsync(request.ToAddress);
+
+            return Ok(new 
+            { 
+                Message = $"{request.Amount} tokens criados com sucesso para o endereço {request.ToAddress}.",
+                NewBalance = newBalance
+            });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { Message = "Ocorreu um erro ao criar os tokens.", Error = ex.Message });
+        }
     }
 
     [HttpPost("sell")]

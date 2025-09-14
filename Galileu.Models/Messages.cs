@@ -37,6 +37,11 @@ public record PongResponse(Guid CorrelationId, string Message) : Message(Correla
 // ## É uma boa prática separá-los, mas podem ficar aqui por enquanto.  ##
 // ####################################################################
 
+// Um nó envia sua lista de pares conhecidos.
+public record GossipSyncRequest(Guid CorrelationId, List<string> KnownPeers) : Message(CorrelationId);
+
+// O outro nó responde com sua própria lista de pares.
+public record GossipSyncResponse(Guid CorrelationId, List<string> KnownPeers) : Message(CorrelationId);
 public record ProcessTaskRequest(string Prompt, Guid TaskId);
 public record StartConsensusRound(Guid TaskId, string[] Subtasks, IActorRef Worker);
 public record ProcessSubtask(Guid TaskId, int SubtaskIndex, string Content);

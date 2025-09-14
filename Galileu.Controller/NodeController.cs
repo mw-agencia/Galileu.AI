@@ -1,4 +1,5 @@
 using Galileu.Models;
+using Galileu.Services;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Galileu.Controller;
@@ -6,9 +7,8 @@ namespace Galileu.Controller;
 public record NodeStatusDto(
     string Id, 
     string Address, 
-    string? ParentAddress, 
-    string? LeftChildAddress, 
-    string? RightChildAddress
+    int KnownPeersCount, // Quantidade de pares conhecidos
+    List<string> KnownPeers // A lista de endereços dos pares conhecidos
 );
 
 [ApiController]
@@ -31,13 +31,12 @@ public class NodeController : ControllerBase
     [ProducesResponseType(typeof(NodeStatusDto), 200)]
     public IActionResult GetStatus()
     {
-        // Usamos o DTO para formatar a resposta
+        // Usamos o DTO para formatar a resposta com as informações da rede Gossip
         var status = new NodeStatusDto(
             _nodeState.Id,
             _nodeState.Address,
-            _nodeState.ParentAddress,
-            _nodeState.LeftChildAddress,
-            _nodeState.RightChildAddress
+            _nodeState.GetKnownPeers().Count, // Obtém a contagem de pares
+            _nodeState.GetKnownPeers()        // Obtém a lista de pares
         );
         
         return Ok(status);

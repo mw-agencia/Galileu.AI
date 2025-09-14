@@ -54,6 +54,20 @@ public class RewardContractService
 
         _logger.LogInformation("BURNED: {Amount} GLU. New total supply: {_totalSupply}", amount, _totalSupply);
     }
+    
+    public async Task MintTokensAsync(string toAddress, decimal amount, string reason)
+    {
+        // Cria a transação de "mint"
+        await _walletService.CreateTransactionAsync(SystemMintAddress, toAddress, amount, $"Mint: {reason}");
+
+        // Atualiza a oferta total de forma thread-safe
+        lock (_lock)
+        {
+            _totalSupply += amount;
+        }
+        
+        _logger.LogInformation("MINTED: {Amount} GLU for {ToAddress}. New total supply: {_totalSupply}", amount, toAddress, _totalSupply);
+    }
 
     private decimal CalculateReward(decimal score)
     {
