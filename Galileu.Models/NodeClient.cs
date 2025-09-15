@@ -65,7 +65,10 @@ public class NodeClient : IDisposable
         }
         catch (WebSocketException)
         {
-            // A conexão foi perdida, o socket será removido.
+            if (_sockets.TryRemove(url, out var staleSocket))
+            {
+                staleSocket.Dispose();
+            }
         }
         finally
         {

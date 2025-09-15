@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("Galileu.Models")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+8c3190f2f46f01f98d185fe5b05b590d031d4ab5")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+d6e0c9ccd9eca2bd4193d3a51cfd139f1f51ddbe")]
 [assembly: System.Reflection.AssemblyProductAttribute("Galileu.Models")]
 [assembly: System.Reflection.AssemblyTitleAttribute("Galileu.Models")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
