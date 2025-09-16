@@ -3,7 +3,7 @@ using System.Text;
 using System.Text.Json;
 using Galileu.Node.Models;
 
-namespace Galileu.Services;
+namespace Galileu.Node.Models;
 
 public class NodeClient
 {

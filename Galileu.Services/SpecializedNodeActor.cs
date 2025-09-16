@@ -9,11 +9,15 @@ public class SpecializedNodeActor : ReceiveActor
     private readonly IEnumerable<string> _specializations;
     private readonly string _nodeId;
     private readonly string _myWalletAddress;
+    private readonly NodeState _nodeState;
 
-    public SpecializedNodeActor(IEnumerable<string> specializations, NodeRegistryService registryService)
+    public SpecializedNodeActor(IEnumerable<string> specializations,
+        NodeRegistryService registryService,
+        NodeState nodeState)
     {
         _registryService = registryService;
         _specializations = specializations;
+        _nodeState = nodeState;
         _nodeId = Self.Path.Name;
         
         // Corrigido: Gera a carteira e atribui o endereço
@@ -55,7 +59,8 @@ public class SpecializedNodeActor : ReceiveActor
     /// </summary>
     protected override void PreStart()
     {
-        _registryService.RegisterNode(Self, _myWalletAddress, _specializations);
+        // Agora passa o endereço de rede do NodeState durante o registro
+        _registryService.RegisterNode(Self, _myWalletAddress, _nodeState.Address, _specializations);
         base.PreStart();
     }
 

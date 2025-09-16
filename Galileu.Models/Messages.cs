@@ -20,13 +20,16 @@ namespace Galileu.Models;
 [JsonDerivedType(typeof(PongResponse), typeDiscriminator: "pong_response")]
 [JsonDerivedType(typeof(GossipSyncRequest), typeDiscriminator: "gossip_sync_request")]
 [JsonDerivedType(typeof(GossipSyncResponse), typeDiscriminator: "gossip_sync_response")]
+[JsonDerivedType(typeof(AuthRequest), typeDiscriminator: "auth_request")]
+[JsonDerivedType(typeof(AuthResponse), typeDiscriminator: "auth_response")]
 public abstract record Message(Guid CorrelationId)
 {
     
 }
 
 // --- Requisições P2P ---
-
+public record AuthRequest(Guid CorrelationId, string NodeJwt) : Message(CorrelationId);
+public record AuthResponse(Guid CorrelationId, bool Success, string Message) : Message(CorrelationId);
 public record JoinRequest(Guid CorrelationId, string NewNodeId, string NewNodeAddress) : Message(CorrelationId);
 public record ForwardJoinRequest(Guid CorrelationId, JoinRequest OriginalRequest) : Message(CorrelationId);
 public record PingRequest(Guid CorrelationId, string FromNodeId) : Message(CorrelationId);

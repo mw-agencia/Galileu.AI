@@ -7,7 +7,7 @@ namespace Galileu.Services;
 public class AkkaHostedService : IHostedService
 {
     private readonly IServiceProvider _serviceProvider;
-    private ActorSystem? _actorSystem; // Pode ser nulo até o StartAsync
+    private ActorSystem? _actorSystem;
 
     public AkkaHostedService(IServiceProvider serviceProvider)
     {
@@ -23,18 +23,19 @@ public class AkkaHostedService : IHostedService
         {
             var registryService = scope.ServiceProvider.GetRequiredService<NodeRegistryService>();
             var rewardContractService = scope.ServiceProvider.GetRequiredService<RewardContractService>();
+            var nodeState = scope.ServiceProvider.GetRequiredService<NodeState>(); // Obter o NodeState
             
             // --- CRIAÇÃO DOS ATORES ---
             _actorSystem.ActorOf(
-                Props.Create(() => new SpecializedNodeActor(new[] { "Tradução" }, registryService)),
+                Props.Create(() => new SpecializedNodeActor(new[] { "Tradução" }, registryService, nodeState)),
                 "node-translator");
 
             _actorSystem.ActorOf(
-                Props.Create(() => new SpecializedNodeActor(new[] { "Análise de Sentimento" }, registryService)),
+                Props.Create(() => new SpecializedNodeActor(new[] { "Análise de Sentimento" }, registryService, nodeState)),
                 "node-sentiment");
 
             _actorSystem.ActorOf(
-                Props.Create(() => new SpecializedNodeActor(new[] { "Geração de Código", "PLN" }, registryService)),
+                Props.Create(() => new SpecializedNodeActor(new[] { "Geração de Código", "PLN" }, registryService, nodeState)),
                 "node-coder-pln");
 
             var consensusCoordinator = _actorSystem.ActorOf(

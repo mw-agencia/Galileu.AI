@@ -1,14 +1,15 @@
 using Akka.Actor;
 using Akka.Configuration;
-using Galileu.Node.Models; // Adicionar este using
+using Galileu.Node.Models;
+using Galileu.Node.Services;
+using Galileu.Services;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.DependencyInjection;
-
-namespace Services;
+using Services;
 
 public class AkkaHostedService : IHostedService
 {
-     private readonly IServiceProvider _serviceProvider;
+    private readonly IServiceProvider _serviceProvider;
     private ActorSystem? _actorSystem;
 
     public AkkaHostedService(IServiceProvider serviceProvider)
@@ -18,33 +19,51 @@ public class AkkaHostedService : IHostedService
 
     public Task StartAsync(CancellationToken cancellationToken)
     {
-        // Obtém a porta do NodeState para configurar o Akka.Remote
         var nodeState = _serviceProvider.GetRequiredService<NodeState>();
-        var akkaPort = new Uri(nodeState.Address).Port + 1000; 
+        var akkaPort = new Uri(nodeState.Address).Port + 10000; // Garante uma porta única
 
         var config = ConfigurationFactory.ParseString(@$"
-            akka {{
-                actor {{
-                    provider = remote
-                }}
-                remote {{
-                    dot-netty.tcp {{
-                        port = {akkaPort}
-                        hostname = localhost
-                    }}
-                }}
-            }}");
+             akka {{
+                 actor {{
+                     provider = remote
+                 }}
+                 remote {{
+                     dot-netty.tcp {{
+                         port = {akkaPort}
+                         hostname = localhost
+                     }}
+                 }}
+             }}");
 
-        _actorSystem = ActorSystem.Create("Galileu-System", config); // Cria o sistema com a config de rede
-        
-        // ... O resto da criação dos atores permanece o mesmo ...
+        _actorSystem = ActorSystem.Create("Galileu-System", config);
 
+        // Disponibiliza o ActorSystem para o resto da aplicação
+        var actorSystemSingleton = _serviceProvider.GetRequiredService<ActorSystemSingleton>();
+        actorSystemSingleton.ActorSystem = _actorSystem;
+
+        // --- CRIA OS ATORES NECESSÁRIOS PARA ESTE NÓ ---
+        using (var scope = _serviceProvider.CreateScope())
+        {
+            var services = scope.ServiceProvider;
+            var registry = services.GetRequiredService<NodeRegistryService>();
+            // Em um sistema real, as especializações viriam de um arquivo de configuração.
+            var specializations = new[] { "Tradução", "Geração de Código" };
+            
+            _actorSystem.ActorOf(
+                Props.Create(() => new SpecializedNodeActor(specializations, registry, nodeState)),
+                $"specialized-node-{nodeState.Id.Substring(0, 8)}"
+            );
+        }
+
+        Console.WriteLine($"[Akka] Sistema de Atores iniciado em akka.tcp://Galileu-System@localhost:{akkaPort}");
         return Task.CompletedTask;
     }
 
-    public Task StopAsync(CancellationToken cancellationToken)
+    public async Task StopAsync(CancellationToken cancellationToken)
     {
-        throw new NotImplementedException();
+        if (_actorSystem != null)
+        {
+            await _actorSystem.Terminate();
+        }
     }
-    // ...
 }

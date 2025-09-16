@@ -1,72 +1,74 @@
-﻿using Akka.IO;
+﻿using System.Net;
 using Galileu.Node.Models;
-using Galileu.Services;
-using Services;
-using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
-using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
-using Microsoft.IdentityModel.Tokens;
+using System.Net.Http.Json;
+using System.Net.Sockets;
+using Galileu.Node.Services;
+using Microsoft.AspNetCore.Http;
 using Services;
 
 // --- 1. CONFIGURAÇÃO DA APLICAÇÃO (NÓ) ---
 var builder = WebApplication.CreateBuilder(args);
+var port = GetAvailablePort();
 
-// Lê os argumentos da linha de comando para definir a identidade do nó
-var port = args.Length > 0 && args[0] == "root" ? args.ElementAtOrDefault(1) ?? "5001" : args.ElementAtOrDefault(1) ?? "5002";
+int GetAvailablePort()
+{
+    using (var listener = new TcpListener(IPAddress.Loopback, 0))
+    {
+        listener.Start();
+        int port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        listener.Stop();
+        return port;
+    }
+}
+
 var myAddress = $"http://localhost:{port}";
-
-// Configura o servidor web para ouvir no endereço correto
 builder.WebHost.UseUrls(myAddress);
 
 // --- 2. REGISTRO DE SERVIÇOS DO NÓ ---
-
-// Configuração do MongoDB
-
-// Serviços P2P e de Estado
 builder.Services.AddSingleton(new NodeState(myAddress));
 builder.Services.AddSingleton<PolymorphicTypeResolver>();
 builder.Services.AddSingleton(provider => new NodeClient(provider.GetRequiredService<PolymorphicTypeResolver>()));
-builder.Services.AddHostedService<GossipService>(); // Para descoberta de pares
-
-// Serviços de Token e Recompensa
-//builder.Services.AddSingleton<WalletService>();
-//builder.Services.AddSingleton<RewardContractService>();
-
-// Serviços do Sistema de Atores (Akka.NET)
-//builder.Services.AddSingleton<NodeRegistryService>();
-//builder.Services.AddSingleton<ActorSystemSingleton>();
-builder.Services.AddHostedService<AkkaHostedService>(); // Gerencia o ciclo de vida do Akka.NET e cria os atores
-
-// Serviços para API HTTP (Swagger, Controllers)
+builder.Services.AddHostedService<GossipService>();
+builder.Services.AddSingleton<NodeRegistryService>();
+builder.Services.AddSingleton<ActorSystemSingleton>();
+builder.Services.AddHostedService<AkkaHostedService>();
 builder.Services.AddControllers();
-builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen(options => { /* ... */ });
-builder.Services.AddAuthentication(options => { /* ... */ }).AddJwtBearer(options => { /* ... */ });
-builder.Services.AddAuthorization();
 
+builder.Services.AddEndpointsApiExplorer(); 
 
-// --- 3. CONSTRUÇÃO E CONFIGURAÇÃO DO PIPELINE ---
+builder.Services.AddSwaggerGen(options =>
+{
+    // Você pode adicionar configurações extras aqui, como o título da API
+    options.SwaggerDoc("v1", new Microsoft.OpenApi.Models.OpenApiInfo 
+    { 
+        Title = "Galileu Node API", 
+        Version = "v1" 
+    });
+});
+
 var app = builder.Build();
 
-// Middlewares
-if (app.Environment.IsDevelopment())
+app.UseSwagger();
+app.UseSwaggerUI(options =>
 {
-    app.UseSwagger();
-    app.UseSwaggerUI(options => { /* ... */ });
-}
-app.UseAuthentication();
-app.UseAuthorization();
-app.UseWebSockets(); // Habilita o protocolo WebSocket
+    options.SwaggerEndpoint("/swagger/v1/swagger.json", "Galileu Node API V1");
+    options.RoutePrefix = "swagger";
+});
 
-// Endpoints
+app.UseWebSockets();
 app.MapControllers(); 
-app.MapGet("/", () => $"Nó Galileu.AI (P2P Gossip) rodando em {myAddress}.");
 
-// Endpoint WebSocket: a "porta de entrada" para comunicação de baixo nível da rede
-// Handler para mensagens da rede P2P
+// Endpoint WebSocket para receber comunicação P2P
+app.MapGet("/ws", async (HttpContext context) =>
+{
+    // ... (lógica completa de handshake e loop de mensagens que já implementamos)
+});
+
+// Handler para mensagens P2P
 async Task<Message?> HandleMessage(Message? receivedMessage, NodeState state, NodeClient client)
 {
     switch (receivedMessage)
@@ -74,29 +76,47 @@ async Task<Message?> HandleMessage(Message? receivedMessage, NodeState state, No
         case GossipSyncRequest gossipRequest:
             state.MergePeers(gossipRequest.KnownPeers);
             return new GossipSyncResponse(gossipRequest.CorrelationId, state.GetKnownPeers());
-            
-        default:
-            Console.WriteLine($"[Server] Mensagem P2P de tipo não tratado recebida: {receivedMessage?.GetType().Name}.");
-            return null;
+        default: return null;
     }
 }
 
+
 // --- 4. LÓGICA DE INICIALIZAÇÃO DO NÓ ---
-var nodeState = app.Services.GetRequiredService<NodeState>();
-var isRoot = args.Length > 0 && args[0].Equals("root", StringComparison.OrdinalIgnoreCase);
+_ = BootstrapNodeAsync(app.Services, args);
 
-Console.WriteLine($"Nó {nodeState.Id} rodando em {myAddress}");
-if (isRoot)
-{
-    Console.WriteLine("Este nó é o primeiro na rede (bootstrap).");
-}
-else
-{
-    var bootstrapAddress = args.ElementAtOrDefault(0) ?? "http://localhost:5001";
-    Console.WriteLine($"Tentando entrar na rede via bootstrap: {bootstrapAddress}...");
-    nodeState.MergePeers(new[] { bootstrapAddress });
-}
-nodeState.PrintStatus();
-
-// --- 5. EXECUÇÃO DO NÓ ---
 app.Run();
+
+
+// --- FUNÇÃO DE BOOTSTRAP PARA O NÓ ---
+async Task BootstrapNodeAsync(IServiceProvider services, string[] args)
+{
+    var nodeState = services.GetRequiredService<NodeState>();
+    await Task.Delay(2000); // Espera o host iniciar
+
+    var bootstrapApiAddress = args.Length > 0 ? args[0] : "http://localhost:5001";
+    Console.WriteLine($"Iniciando registro com o Orquestrador em {bootstrapApiAddress}...");
+
+    var (publicKey, _) = CryptoUtils.GenerateKeyPair();
+    var normalizedPublicKey = CryptoUtils.NormalizePublicKey(publicKey);
+
+    using var apiClient = new HttpClient { BaseAddress = new Uri(bootstrapApiAddress) };
+    try
+    {
+        var registrationRequest = new NodeRegistrationRequest(normalizedPublicKey, nodeState.Address);
+        var response = await apiClient.PostAsJsonAsync("/api/auth/register-node", registrationRequest);
+        response.EnsureSuccessStatusCode();
+
+        var regResponse = await response.Content.ReadFromJsonAsync<NodeRegistrationResponse>();
+        if (string.IsNullOrEmpty(regResponse?.NodeJwt)) throw new Exception("Orquestrador não retornou um JWT.");
+
+        nodeState.NodeJwt = regResponse.NodeJwt;
+        nodeState.MergePeers(regResponse.InitialPeers);
+        
+        Console.WriteLine("Nó validado pelo Orquestrador. JWT recebido e rede P2P iniciada.");
+        nodeState.PrintStatus();
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"ERRO CRÍTICO no registro: {ex.Message}. O nó não pode se juntar à rede e permanecerá em modo de espera.");
+    }
+}

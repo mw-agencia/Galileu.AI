@@ -1,6 +1,11 @@
+using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
+using System.Text;
 using Galileu.Models;
 using Galileu.Services;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Configuration;
+using Microsoft.IdentityModel.Tokens;
 
 namespace Galileu.Controller;
 
@@ -15,11 +20,16 @@ public record NodeStatusDto(
 [Route("api/[controller]")] // A rota será /api/node
 public class NodeController : ControllerBase
 {
+    private readonly NodeRegistryService _nodeRegistry;
     private readonly NodeState _nodeState;
+    private readonly IConfiguration _configuration;
+
 
     // O NodeState é injetado automaticamente pelo container de DI
-    public NodeController(NodeState nodeState)
+    public NodeController(IConfiguration configuration,NodeState nodeState,NodeRegistryService nodeRegistry)
     {
+        _nodeRegistry = nodeRegistry;
+        _configuration  = configuration;
         _nodeState = nodeState;
     }
 
@@ -40,5 +50,39 @@ public class NodeController : ControllerBase
         );
         
         return Ok(status);
+    }
+    [HttpPost("register")]
+    public IActionResult RegisterNode([FromBody] NodeRegistrationRequest request)
+    {
+        var secretKey = _configuration["Jwt:SecretKey"]!;
+        var issuer = _configuration["Jwt:Issuer"] ?? "GalileuAPI";
+        var audience = _configuration["Jwt:NodeAudience"] ?? "GalileuNodes"; // Usa a audiência correta
+
+        var securityKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secretKey));
+        var credentials = new SigningCredentials(securityKey, SecurityAlgorithms.HmacSha256);
+
+        var claims = new[]
+        {
+            new Claim(ClaimTypes.NameIdentifier, request.PublicWalletAddress),
+            new Claim(ClaimTypes.Role, "node"),
+            new Claim("node_address", request.NodeNetworkAddress)
+        };
+
+        var token = new JwtSecurityToken(
+            issuer: issuer,
+            audience: audience, // Usa a audiência correta
+            claims: claims,
+            expires: DateTime.UtcNow.AddYears(1),
+            signingCredentials: credentials);
+
+        var tokenString = new JwtSecurityTokenHandler().WriteToken(token);
+
+        var knownPeers = _nodeRegistry.GetAllNodeAddresses().Where(addr => addr != request.NodeNetworkAddress);
+
+        return Ok(new 
+        { 
+            NodeJwt = tokenString,
+            InitialPeers = knownPeers 
+        });
     }
 }

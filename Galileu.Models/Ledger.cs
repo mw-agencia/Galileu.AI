@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.RegularExpressions;
 
 namespace Galileu.Models;
 
@@ -33,5 +34,22 @@ public static class CryptoUtils
         var data = $"{id}{timestamp:O}{from}{to}{amount}";
         var hashBytes = sha256.ComputeHash(Encoding.UTF8.GetBytes(data));
         return Convert.ToBase64String(hashBytes);
+    }
+    
+    public static string NormalizePublicKey(string rawKey) // O método DEVE ser estático
+    {
+        if (string.IsNullOrWhiteSpace(rawKey))
+        {
+            return string.Empty;
+        }
+
+        // Remove os cabeçalhos/rodapés comuns de chaves PEM (opcional, mas bom ter)
+        var key = rawKey.Replace("-----BEGIN PUBLIC KEY-----", "")
+            .Replace("-----END PUBLIC KEY-----", "");
+        
+        // Remove todos os caracteres de espaço em branco (espaços, tabs, quebras de linha \r e \n)
+        key = Regex.Replace(key, @"\s+", "");
+        
+        return key;
     }
 }

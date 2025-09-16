@@ -1,7 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
-using Akka.IO;
+using Galileu.Node.Models;
 
 namespace Galileu.Node.Models;
 
@@ -11,7 +11,8 @@ public class PolymorphicTypeResolver : DefaultJsonTypeInfoResolver
     {
         JsonTypeInfo jsonTypeInfo = base.GetTypeInfo(type, options);
 
-        Type baseMessage = typeof(Tcp.Message);
+        // CORRIGIDO: Usa o tipo base correto 'Message'
+        Type baseMessage = typeof(Message);
         if (jsonTypeInfo.Type == baseMessage)
         {
             jsonTypeInfo.PolymorphismOptions = new JsonPolymorphismOptions
@@ -21,12 +22,15 @@ public class PolymorphicTypeResolver : DefaultJsonTypeInfoResolver
                 UnknownDerivedTypeHandling = JsonUnknownDerivedTypeHandling.FailSerialization,
             };
 
-            // Adicione os tipos derivados aqui
-            foreach (var derivedType in typeof(Tcp.Message).GetCustomAttributes(typeof(JsonDerivedTypeAttribute), false)
+            foreach (var derivedType in baseMessage.GetCustomAttributes(typeof(JsonDerivedTypeAttribute), false)
                          .Cast<JsonDerivedTypeAttribute>())
             {
-                jsonTypeInfo.PolymorphismOptions.DerivedTypes.Add(
-                    new JsonDerivedType(derivedType.DerivedType, derivedType.TypeDiscriminator.ToString()));
+                // Tratamento de erro para TypeDiscriminator nulo
+                if (derivedType.TypeDiscriminator != null)
+                {
+                    jsonTypeInfo.PolymorphismOptions.DerivedTypes.Add(
+                        new JsonDerivedType(derivedType.DerivedType, derivedType.TypeDiscriminator.ToString()!));
+                }
             }
         }
 

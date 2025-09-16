@@ -5,9 +5,8 @@ namespace Galileu.Node.Models;
 public class NodeState
 {
     public string Id { get; }
-    public string Address { get; } // Nosso próprio endereço (ex: http://localhost:5001)
-
-    // Lista thread-safe de endereços dos pares que este nó conhece.
+    public string Address { get; }
+    public string? NodeJwt { get; set; }
     private readonly ConcurrentDictionary<string, DateTime> _knownPeers = new();
     
 

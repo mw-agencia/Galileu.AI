@@ -6,6 +6,8 @@ public class NodeState
 {
     public string Id { get; }
     public string Address { get; } // Nosso próprio endereço (ex: http://localhost:5001)
+    
+    public string? NodeJwt { get; set; }
 
     // Lista thread-safe de endereços dos pares que este nó conhece.
     private readonly ConcurrentDictionary<string, DateTime> _knownPeers = new();

@@ -49,6 +49,14 @@
               "target": "Package",
               "version": "[1.5.49, )"
             },
+            "Akka.Logger.Serilog": {
+              "target": "Package",
+              "version": "[1.5.25, )"
+            },
+            "Akka.Remote": {
+              "target": "Package",
+              "version": "[1.5.27, )"
+            },
             "Microsoft.AspNetCore.Authentication.JwtBearer": {
               "target": "Package",
               "version": "[8.0.0, )"
@@ -65,7 +73,19 @@
               "target": "Package",
               "version": "[3.5.0, )"
             },
+            "Serilog.AspNetCore": {
+              "target": "Package",
+              "version": "[8.0.0, )"
+            },
             "Swashbuckle.AspNetCore": {
+              "target": "Package",
+              "version": "[8.0.0, )"
+            },
+            "Swashbuckle.AspNetCore.Swagger": {
+              "target": "Package",
+              "version": "[8.0.0, )"
+            },
+            "Swashbuckle.AspNetCore.SwaggerUI": {
               "target": "Package",
               "version": "[8.0.0, )"
             }
