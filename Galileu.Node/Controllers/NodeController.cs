@@ -6,7 +6,7 @@ namespace Galileu.Node.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-public class NodeController: ControllerBase
+public class NodeController : ControllerBase
 {
     private readonly NodeRegistryService _nodeRegistryService; // Exemplo de injeção se for o caso
 

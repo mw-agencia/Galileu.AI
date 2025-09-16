@@ -10,7 +10,6 @@ using Galileu.Node.Services;
 using Microsoft.AspNetCore.Http;
 using Services;
 
-// --- 1. CONFIGURAÇÃO DA APLICAÇÃO (NÓ) ---
 var builder = WebApplication.CreateBuilder(args);
 var port = GetAvailablePort();
 
@@ -28,12 +27,12 @@ int GetAvailablePort()
 var myAddress = $"http://localhost:{port}";
 builder.WebHost.UseUrls(myAddress);
 
-// --- 2. REGISTRO DE SERVIÇOS DO NÓ ---
 builder.Services.AddSingleton(new NodeState(myAddress));
 builder.Services.AddSingleton<PolymorphicTypeResolver>();
 builder.Services.AddSingleton(provider => new NodeClient(provider.GetRequiredService<PolymorphicTypeResolver>()));
 builder.Services.AddHostedService<GossipService>();
 builder.Services.AddSingleton<NodeRegistryService>();
+builder.Services.AddSingleton<WalletService>();
 builder.Services.AddSingleton<ActorSystemSingleton>();
 builder.Services.AddHostedService<AkkaHostedService>();
 builder.Services.AddControllers();
@@ -42,7 +41,7 @@ builder.Services.AddEndpointsApiExplorer();
 
 builder.Services.AddSwaggerGen(options =>
 {
-    // Você pode adicionar configurações extras aqui, como o título da API
+    
     options.SwaggerDoc("v1", new Microsoft.OpenApi.Models.OpenApiInfo 
     { 
         Title = "Galileu Node API", 
@@ -62,13 +61,10 @@ app.UseSwaggerUI(options =>
 app.UseWebSockets();
 app.MapControllers(); 
 
-// Endpoint WebSocket para receber comunicação P2P
 app.MapGet("/ws", async (HttpContext context) =>
 {
-    // ... (lógica completa de handshake e loop de mensagens que já implementamos)
+    
 });
-
-// Handler para mensagens P2P
 async Task<Message?> HandleMessage(Message? receivedMessage, NodeState state, NodeClient client)
 {
     switch (receivedMessage)
@@ -80,14 +76,11 @@ async Task<Message?> HandleMessage(Message? receivedMessage, NodeState state, No
     }
 }
 
-
-// --- 4. LÓGICA DE INICIALIZAÇÃO DO NÓ ---
 _ = BootstrapNodeAsync(app.Services, args);
 
 app.Run();
 
 
-// --- FUNÇÃO DE BOOTSTRAP PARA O NÓ ---
 async Task BootstrapNodeAsync(IServiceProvider services, string[] args)
 {
     var nodeState = services.GetRequiredService<NodeState>();
