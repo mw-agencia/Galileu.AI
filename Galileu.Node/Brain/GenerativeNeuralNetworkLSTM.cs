@@ -1,16 +1,14 @@
-namespace Galileu.Node.Core;
-
-using System;
-using System.Collections.Generic;
-using System.Linq;
+using Galileu.Node.Core;
 using Galileu.Node.Interfaces;
 
-public class GenerativeNeuralNetworkRNN : NeuralNetworkRNN
+namespace Galileu.Node.Brain;
+
+public class GenerativeNeuralNetworkLSTM : NeuralNetworkLSTM
 {
     private readonly VocabularyManager vocabularyManager;
     private readonly ISearchService searchService;
 
-    public GenerativeNeuralNetworkRNN(int inputSize, int hiddenSize, int outputSize, string datasetPath, ISearchService searchService = null)
+    public GenerativeNeuralNetworkLSTM(int inputSize, int hiddenSize, int outputSize, string datasetPath, ISearchService searchService = null)
         : base(inputSize, hiddenSize, outputSize)
     {
         this.vocabularyManager = new VocabularyManager();
@@ -26,11 +24,19 @@ public class GenerativeNeuralNetworkRNN : NeuralNetworkRNN
         }
     }
 
-    public GenerativeNeuralNetworkRNN(int inputSize, int hiddenSize, int outputSize,
-                                       Tensor weightsInputHidden, Tensor weightsHiddenHidden, Tensor biasHidden,
-                                       Tensor weightsHiddenOutput, Tensor biasOutput,
-                                       VocabularyManager vocabManager)
-        : base(inputSize, hiddenSize, outputSize, weightsInputHidden, weightsHiddenHidden, biasHidden, weightsHiddenOutput, biasOutput)
+    public GenerativeNeuralNetworkLSTM(int inputSize, int hiddenSize, int outputSize,
+                                        Tensor weightsInputForget, Tensor weightsHiddenForget,
+                                        Tensor weightsInputInput, Tensor weightsHiddenInput,
+                                        Tensor weightsInputCell, Tensor weightsHiddenCell,
+                                        Tensor weightsInputOutput, Tensor weightsHiddenOutput,
+                                        Tensor biasForget, Tensor biasInput, Tensor biasCell, Tensor biasOutput,
+                                        Tensor weightsHiddenOutputFinal, Tensor biasOutputFinal,
+                                        VocabularyManager vocabManager)
+        : base(inputSize, hiddenSize, outputSize,
+               weightsInputForget, weightsHiddenForget, weightsInputInput, weightsHiddenInput,
+               weightsInputCell, weightsHiddenCell, weightsInputOutput, weightsHiddenOutput,
+               biasForget, biasInput, biasCell, biasOutput,
+               weightsHiddenOutputFinal, biasOutputFinal)
     {
         this.vocabularyManager = vocabManager ?? throw new ArgumentNullException(nameof(vocabManager));
         this.searchService = new MockSearchService();

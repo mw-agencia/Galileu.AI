@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "dgSpecHash": "ls9jROgu1Ks=",
+  "dgSpecHash": "NMmhZX+szZs=",
   "success": true,
   "projectFilePath": "/home/mplopes/Documentos/GitHub/Galileu.AI/Galileu.Node/Galileu.Node.csproj",
   "expectedPackageFiles": [
@@ -58,6 +58,7 @@
     "/home/mplopes/.nuget/packages/mongodb.bson/3.5.0/mongodb.bson.3.5.0.nupkg.sha512",
     "/home/mplopes/.nuget/packages/mongodb.driver/3.5.0/mongodb.driver.3.5.0.nupkg.sha512",
     "/home/mplopes/.nuget/packages/newtonsoft.json/13.0.1/newtonsoft.json.13.0.1.nupkg.sha512",
+    "/home/mplopes/.nuget/packages/opencl.net/2.2.9/opencl.net.2.2.9.nupkg.sha512",
     "/home/mplopes/.nuget/packages/serilog/3.1.1/serilog.3.1.1.nupkg.sha512",
     "/home/mplopes/.nuget/packages/serilog.aspnetcore/8.0.0/serilog.aspnetcore.8.0.0.nupkg.sha512",
     "/home/mplopes/.nuget/packages/serilog.extensions.hosting/8.0.0/serilog.extensions.hosting.8.0.0.nupkg.sha512",
@@ -92,5 +93,18 @@
     "/home/mplopes/.nuget/packages/zstdsharp.port/0.7.3/zstdsharp.port.0.7.3.nupkg.sha512",
     "/home/mplopes/.nuget/packages/microsoft.aspnetcore.app.ref/8.0.16/microsoft.aspnetcore.app.ref.8.0.16.nupkg.sha512"
   ],
-  "logs": []
+  "logs": [
+    {
+      "code": "NU1701",
+      "level": "Warning",
+      "message": "Package 'OpenCL.Net 2.2.9' was restored using '.NETFramework,Version=v4.6.1, .NETFramework,Version=v4.6.2, .NETFramework,Version=v4.7, .NETFramework,Version=v4.7.1, .NETFramework,Version=v4.7.2, .NETFramework,Version=v4.8, .NETFramework,Version=v4.8.1' instead of the project target framework 'net8.0'. This package may not be fully compatible with your project.",
+      "projectPath": "/home/mplopes/Documentos/GitHub/Galileu.AI/Galileu.Node/Galileu.Node.csproj",
+      "warningLevel": 1,
+      "filePath": "/home/mplopes/Documentos/GitHub/Galileu.AI/Galileu.Node/Galileu.Node.csproj",
+      "libraryId": "OpenCL.Net",
+      "targetGraphs": [
+        "net8.0"
+      ]
+    }
+  ]
 }

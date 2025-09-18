@@ -73,6 +73,10 @@
               "target": "Package",
               "version": "[3.5.0, )"
             },
+            "OpenCL.Net": {
+              "target": "Package",
+              "version": "[2.2.9, )"
+            },
             "Serilog.AspNetCore": {
               "target": "Package",
               "version": "[8.0.0, )"

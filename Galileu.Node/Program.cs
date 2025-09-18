@@ -32,6 +32,7 @@ builder.Services.AddSingleton<PolymorphicTypeResolver>();
 builder.Services.AddSingleton(provider => new NodeClient(provider.GetRequiredService<PolymorphicTypeResolver>()));
 builder.Services.AddHostedService<GossipService>();
 builder.Services.AddSingleton<NodeRegistryService>();
+builder.Services.AddSingleton<GenerativeService>();
 builder.Services.AddSingleton<WalletService>();
 builder.Services.AddSingleton<ActorSystemSingleton>();
 builder.Services.AddHostedService<AkkaHostedService>();
@@ -44,7 +45,7 @@ builder.Services.AddSwaggerGen(options =>
     
     options.SwaggerDoc("v1", new Microsoft.OpenApi.Models.OpenApiInfo 
     { 
-        Title = "Galileu Node API", 
+        Title = "Dyson Node API", 
         Version = "v1" 
     });
 });
@@ -54,7 +55,7 @@ var app = builder.Build();
 app.UseSwagger();
 app.UseSwaggerUI(options =>
 {
-    options.SwaggerEndpoint("/swagger/v1/swagger.json", "Galileu Node API V1");
+    options.SwaggerEndpoint("/swagger/v1/swagger.json", "Dyson Node API V1");
     options.RoutePrefix = "swagger";
 });
 

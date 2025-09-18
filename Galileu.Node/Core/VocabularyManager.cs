@@ -1,10 +1,12 @@
+using System.Text.RegularExpressions;
+
 namespace Galileu.Node.Core;
 
 public class VocabularyManager
 {
     private readonly Dictionary<string, int> vocab;
     private readonly Dictionary<int, string> reverseVocab;
-    private readonly string vocabFile = "vocab.txt";
+    public string VocabFilePath { get; } = Path.Combine(Environment.CurrentDirectory, "Dayson", "vocab.txt");
 
     public VocabularyManager()
     {
@@ -12,64 +14,58 @@ public class VocabularyManager
         reverseVocab = new Dictionary<int, string>();
     }
 
-    /// <summary>
-    /// Obtém o dicionário de vocabulário (token para índice).
-    /// </summary>
     public Dictionary<string, int> Vocab => vocab;
-
-    /// <summary>
-    /// Obtém o dicionário reverso de vocabulário (índice para token).
-    /// </summary>
     public Dictionary<int, string> ReverseVocab => reverseVocab;
-
-    /// <summary>
-    /// Obtém o tamanho do vocabulário.
-    /// </summary>
     public int VocabSize => vocab.Count;
 
-    /// <summary>
-    /// Constrói o vocabulário a partir de um arquivo de dataset e salva em vocab.txt.
-    /// </summary>
-    /// <param name="datasetPath">Caminho do arquivo de dataset.</param>
-    /// <returns>Tamanho do vocabulário construído.</returns>
     public int BuildVocabulary(string datasetPath)
     {
-        HashSet<string> tokens = new HashSet<string>();
+        var tokens = new HashSet<string>();
 
-        // Carrega tokens existentes de vocab.txt, se disponível
-        if (File.Exists(vocabFile))
+        if (File.Exists(VocabFilePath))
         {
-            foreach (var line in File.ReadAllLines(vocabFile))
+            foreach (var line in File.ReadAllLines(VocabFilePath))
             {
-                string token = line.Trim();
-                if (!string.IsNullOrEmpty(token))
-                {
-                    tokens.Add(token);
-                }
+                if (!string.IsNullOrEmpty(line.Trim())) tokens.Add(line.Trim());
             }
         }
 
-        // Extrai novos tokens do dataset
+        // --- CORREÇÃO: Tokenização Aprimorada com Regex ---
+        // Este padrão é a chave da solução. Ele captura:
+        // 1. (\p{L}+) - Sequências de uma ou mais letras (palavras).
+        // 2. (\p{N}+) - Sequências de um ou mais números.
+        // 3. ([.,!?;:'"/\-]) - Qualquer um dos caracteres especiais listados, individualmente.
+        string pattern = @"(\p{L}+|\p{N}+|[.,!?;:'""/\-])";
+
         if (File.Exists(datasetPath))
         {
-            foreach (var line in File.ReadAllLines(datasetPath))
+            var datasetText = File.ReadAllText(datasetPath);
+            var matches = Regex.Matches(datasetText.ToLower(), pattern);
+            foreach (Match match in matches)
             {
-                var newTokens = line.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries)
-                                    .Select(t => t.Trim());
-                foreach (var token in newTokens)
-                {
-                    tokens.Add(token);
-                }
+                tokens.Add(match.Value);
             }
         }
+        
+        // Adiciona tokens especiais se não existirem
+        tokens.Add("<PAD>"); // Padding
+        tokens.Add("<UNK>"); // Unknown token
 
-        // Salva o vocabulário em vocab.txt e mapeia tokens para índices
         vocab.Clear();
         reverseVocab.Clear();
-        using (var writer = new StreamWriter(vocabFile, false))
+        
+        // Garante que o diretório exista antes de escrever o arquivo
+        var directory = Path.GetDirectoryName(VocabFilePath);
+        if (directory != null && !Directory.Exists(directory))
+        {
+            Directory.CreateDirectory(directory);
+        }
+
+        using (var writer = new StreamWriter(VocabFilePath, false))
         {
             int index = 0;
-            foreach (var token in tokens)
+            // Ordena os tokens para garantir um vocabulário consistente entre execuções
+            foreach (var token in tokens.OrderBy(t => t))
             {
                 writer.WriteLine(token);
                 vocab[token] = index;
@@ -81,22 +77,18 @@ public class VocabularyManager
         return tokens.Count;
     }
 
-    /// <summary>
-    /// Carrega o vocabulário de um arquivo vocab.txt existente.
-    /// </summary>
-    /// <returns>Tamanho do vocabulário carregado.</returns>
     public int LoadVocabulary()
     {
         vocab.Clear();
         reverseVocab.Clear();
 
-        if (!File.Exists(vocabFile))
+        if (!File.Exists(VocabFilePath))
         {
-            throw new FileNotFoundException($"Arquivo de vocabulário não encontrado em: {vocabFile}");
+            return 0;
         }
 
         int index = 0;
-        foreach (var line in File.ReadAllLines(vocabFile))
+        foreach (var line in File.ReadAllLines(VocabFilePath))
         {
             string token = line.Trim();
             if (!string.IsNullOrEmpty(token))

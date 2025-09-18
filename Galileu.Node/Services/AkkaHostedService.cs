@@ -35,18 +35,13 @@ public class AkkaHostedService : IHostedService
                  }}
              }}");
 
-        _actorSystem = ActorSystem.Create("Galileu-System", config);
-
-        // Disponibiliza o ActorSystem para o resto da aplicação
+        _actorSystem = ActorSystem.Create("Dyson-System", config);
         var actorSystemSingleton = _serviceProvider.GetRequiredService<ActorSystemSingleton>();
         actorSystemSingleton.ActorSystem = _actorSystem;
-
-        // --- CRIA OS ATORES NECESSÁRIOS PARA ESTE NÓ ---
         using (var scope = _serviceProvider.CreateScope())
         {
             var services = scope.ServiceProvider;
             var registry = services.GetRequiredService<NodeRegistryService>();
-            // Em um sistema real, as especializações viriam de um arquivo de configuração.
             var specializations = new[] { "Tradução", "Geração de Código" };
             
             _actorSystem.ActorOf(
@@ -55,7 +50,7 @@ public class AkkaHostedService : IHostedService
             );
         }
 
-        Console.WriteLine($"[Akka] Sistema de Atores iniciado em akka.tcp://Galileu-System@localhost:{akkaPort}");
+        Console.WriteLine($"[Akka] Sistema de Atores iniciado em akka.tcp://Dyson-System@localhost:{akkaPort}");
         return Task.CompletedTask;
     }
 
