@@ -25,6 +25,7 @@ int GetAvailablePort()
 }
 
 var myAddress = $"http://localhost:{port}";
+Console.WriteLine($" === Swagger Acess http://localhost:{port}/swagger/index.html ===");
 builder.WebHost.UseUrls(myAddress);
 
 builder.Services.AddSingleton(new NodeState(myAddress));

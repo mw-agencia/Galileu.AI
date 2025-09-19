@@ -64,3 +64,4 @@
 /home/mplopes/Documentos/GitHub/Galileu.AI/Galileu.Node/bin/Debug/net8.0/Serilog.Sinks.Debug.dll
 /home/mplopes/Documentos/GitHub/Galileu.AI/Galileu.Node/bin/Debug/net8.0/Serilog.Sinks.File.dll
 /home/mplopes/Documentos/GitHub/Galileu.AI/Galileu.Node/bin/Debug/net8.0/Akka.Logger.Serilog.dll
+/home/mplopes/Documentos/GitHub/Galileu.AI/Galileu.Node/bin/Debug/net8.0/OpenCL.Net.dll
