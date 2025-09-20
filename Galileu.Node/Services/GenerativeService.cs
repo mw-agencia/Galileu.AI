@@ -1,10 +1,9 @@
-// --- START OF FILE GenerativeService.cs ---
-
 using Galileu.Node.Brain;
-using Galileu.Node.Core; // Para VocabularyManager
+using Galileu.Node.Core;
 using Galileu.Node.Interfaces;
 using Galileu.Node.Models;
-using System.Text.Json; // Para JsonSerializer
+using System.Text.Json;
+using Galileu.Node.Brain.Gpu;
 
 namespace Galileu.Node.Services;
 
@@ -14,10 +13,19 @@ public class GenerativeService
     private int _hiddenSize;
     private int _outputSize;
     private int _contextWindowSize;
-    private string _modelPath;
-    private ISearchService _searchService;
+    private string _modelPath = "";
+    private ISearchService _searchService = new MockSearchService();
+    
+    // CORREÇÃO: Adicionamos o OpenCLService como uma dependência do serviço.
+    private readonly OpenCLService _openCLService;
     
     public bool IsConfigured { get; private set; } = false;
+
+    // CORREÇÃO: Injetamos o OpenCLService através do construtor.
+    public GenerativeService(OpenCLService openCLService)
+    {
+        _openCLService = openCLService;
+    }
 
     public void Configure(int inputSize, int hiddenSize, int outputSize, int contextWindowSize, string modelPath, ISearchService searchService)
     {
@@ -33,7 +41,7 @@ public class GenerativeService
 
     public bool TryLoadConfigurationFromModel()
     {
-        if (!File.Exists(_modelPath)) return false;
+        if (string.IsNullOrEmpty(_modelPath) || !File.Exists(_modelPath)) return false;
 
         try
         {
@@ -68,7 +76,6 @@ public class GenerativeService
 
     public async Task TrainModelAsync(Trainer trainerOptions)
     {
-        // (O resto do código permanece o mesmo, está correto)
         if (trainerOptions == null) return;
         
         await Task.Run(() =>
@@ -76,10 +83,18 @@ public class GenerativeService
             try
             {
                 Console.WriteLine("Criando e treinando o modelo LSTM generativo...");
-                var model = new GenerativeNeuralNetworkLSTM(_inputSize, _hiddenSize, _outputSize, trainerOptions.datasetPath, _searchService);
+                
+                // CORREÇÃO: Passamos o _openCLService para o construtor, que agora espera 6 argumentos.
+                var model = new GenerativeNeuralNetworkLSTM(
+                    _inputSize, 
+                    _hiddenSize, 
+                    _outputSize, 
+                    trainerOptions.datasetPath, 
+                    _searchService, 
+                    _openCLService);
                 
                 var trainer = new ModelTrainerLSTM(model);
-                trainer.TrainModel(trainerOptions.datasetPath, trainerOptions.learningRate, trainerOptions.epochs, batchSize: 32, _contextWindowSize);
+                trainer.TrainModel(trainerOptions.datasetPath, trainerOptions.learningRate, trainerOptions.epochs, batchSize: 32, contextWindowSize: _contextWindowSize);
                 
                 ModelSerializerLSTM.SaveModel(model, _modelPath);
                 Console.WriteLine($"Modelo salvo com sucesso em: {_modelPath}");
@@ -93,12 +108,12 @@ public class GenerativeService
 
     public async Task<string?> GenerateAsync(GenerateResponse generateResponse)
     {
-        // (O resto do código permanece o mesmo)
         return await Task.Run(() =>
         {
             try
             {
-                var loadedModel = ModelSerializerLSTM.LoadModel(_modelPath);
+                // CORREÇÃO: Passamos o _openCLService para o método LoadModel, que agora espera 2 argumentos.
+                var loadedModel = ModelSerializerLSTM.LoadModel(_modelPath, _openCLService);
                 if (loadedModel == null)
                 {
                     return "Erro: Modelo não pôde ser carregado.";

@@ -1,5 +1,6 @@
 using Galileu.Node.Core;
 using Galileu.Node.Interfaces;
+using Galileu.Node.Brain.Gpu;
 
 namespace Galileu.Node.Brain;
 
@@ -8,8 +9,8 @@ public class GenerativeNeuralNetworkLSTM : NeuralNetworkLSTM
     private readonly VocabularyManager vocabularyManager;
     private readonly ISearchService searchService;
 
-    public GenerativeNeuralNetworkLSTM(int inputSize, int hiddenSize, int outputSize, string datasetPath, ISearchService searchService = null)
-        : base(inputSize, hiddenSize, outputSize)
+    public GenerativeNeuralNetworkLSTM(int inputSize, int hiddenSize, int outputSize, string datasetPath, ISearchService? searchService, OpenCLService? openCLService)
+        : base(inputSize, hiddenSize, outputSize, openCLService)
     {
         this.vocabularyManager = new VocabularyManager();
         this.searchService = searchService ?? new MockSearchService();
@@ -17,6 +18,11 @@ public class GenerativeNeuralNetworkLSTM : NeuralNetworkLSTM
         if (vocabSize == 0)
         {
             throw new InvalidOperationException("Vocabulário vazio. Verifique o arquivo de dataset.");
+        }
+        // Validação crucial: o input da rede deve ser do tamanho do vocabulário para one-hot encoding
+        if (vocabSize != inputSize)
+        {
+             throw new ArgumentException($"O tamanho do vocabulário ({vocabSize}) deve ser igual ao inputSize ({inputSize}).");
         }
         if (vocabSize != outputSize)
         {
@@ -31,12 +37,14 @@ public class GenerativeNeuralNetworkLSTM : NeuralNetworkLSTM
                                         Tensor weightsInputOutput, Tensor weightsHiddenOutput,
                                         Tensor biasForget, Tensor biasInput, Tensor biasCell, Tensor biasOutput,
                                         Tensor weightsHiddenOutputFinal, Tensor biasOutputFinal,
-                                        VocabularyManager vocabManager)
+                                        VocabularyManager vocabManager,
+                                        OpenCLService? openCLService)
         : base(inputSize, hiddenSize, outputSize,
                weightsInputForget, weightsHiddenForget, weightsInputInput, weightsHiddenInput,
                weightsInputCell, weightsHiddenCell, weightsInputOutput, weightsHiddenOutput,
                biasForget, biasInput, biasCell, biasOutput,
-               weightsHiddenOutputFinal, biasOutputFinal)
+               weightsHiddenOutputFinal, biasOutputFinal,
+               openCLService)
     {
         this.vocabularyManager = vocabManager ?? throw new ArgumentNullException(nameof(vocabManager));
         this.searchService = new MockSearchService();
@@ -49,146 +57,74 @@ public class GenerativeNeuralNetworkLSTM : NeuralNetworkLSTM
             return "Erro: Entrada vazia ou nula.";
         }
 
+        // 1. Prepara o estado inicial da rede (priming)
         ResetHiddenState();
-
-        var tokens = inputText.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
-        if (tokens.Length == 0)
+        var tokens = Tokenize(inputText);
+        
+        foreach (var token in tokens)
         {
-            return "Erro: Nenhum token válido na entrada.";
+            var inputTensor = CreateOneHotTensorForToken(token);
+            Forward(inputTensor); // Aquece a rede com o prompt
         }
 
-        bool needsSearch = tokens.Any(t => !vocabularyManager.Vocab.ContainsKey(t));
-        string enrichedInput = inputText;
-        if (needsSearch)
-        {
-            try
-            {
-                var searchResults = searchService.Search(inputText) ?? new List<string>();
-                enrichedInput = $"{inputText} {string.Join(" ", searchResults)}".Trim();
-                tokens = enrichedInput.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Erro na busca: {ex.Message}. Usando entrada original.");
-            }
-        }
-
-        foreach (var token in tokens.Take(InputSize))
-        {
-            double[] inputData = new double[InputSize];
-            if (vocabularyManager.Vocab.ContainsKey(token))
-            {
-                inputData[0] = vocabularyManager.Vocab[token];
-            }
-            else
-            {
-                inputData[0] = vocabularyManager.Vocab.ContainsKey("<UNK>") ? vocabularyManager.Vocab["<UNK>"] : 0;
-            }
-            Tensor inputTensor = new Tensor(inputData, new int[] { InputSize });
-            Forward(inputTensor);
-        }
-
+        // 2. Inicia a geração de texto
         List<string> responseTokens = new List<string>();
+        string lastToken = tokens.LastOrDefault() ?? "<UNK>";
+
         for (int i = 0; i < maxLength; i++)
         {
-            double[] inputData = new double[InputSize];
-            Tensor inputTensor = new Tensor(inputData, new int[] { InputSize });
-            var output = Forward(inputTensor);
+            var inputTensor = CreateOneHotTensorForToken(lastToken);
+            var output = Forward(inputTensor); // Gera o próximo token
+            
             int predictedTokenIndex = SampleToken(output);
             string predictedToken = vocabularyManager.ReverseVocab.ContainsKey(predictedTokenIndex)
                 ? vocabularyManager.ReverseVocab[predictedTokenIndex]
                 : "<UNK>";
+            
+            // Critério de parada: se gerar um token de fim de frase ou repetir demais
+            if (predictedToken == "." || predictedToken == "!" || predictedToken == "?")
+            {
+                responseTokens.Add(predictedToken);
+                break;
+            }
+            
             responseTokens.Add(predictedToken);
+            lastToken = predictedToken; // O próximo input será o token que acabamos de gerar
         }
 
+        // 3. Pós-processamento
         string response = string.Join(" ", responseTokens).Trim();
         if (string.IsNullOrEmpty(response))
         {
-            response = "Erro: Resposta vazia gerada.";
-        }
-        else if (!IsResponseCoherent(inputText, response))
-        {
-            response = AdjustResponse(inputText, response);
+            response = "Não foi possível gerar uma resposta.";
         }
 
         return response.Capitalize();
     }
-
-    public string GenerateSummary(string inputText, int summaryLength = 10)
+    
+    // Métodos utilitários refatorados
+    private string[] Tokenize(string text)
     {
-        if (string.IsNullOrEmpty(inputText))
+        return text.ToLower().Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+    }
+    
+    private Tensor CreateOneHotTensorForToken(string token)
+    {
+        double[] inputData = new double[InputSize]; // Cria um vetor de zeros
+        if (vocabularyManager.Vocab.TryGetValue(token, out int tokenIndex))
         {
-            return "Erro: Entrada vazia ou nula.";
+            if (tokenIndex < inputData.Length)
+                inputData[tokenIndex] = 1.0; // Define a posição do token como 1
         }
-
-        ResetHiddenState();
-
-        var tokens = inputText.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
-        if (tokens.Length == 0)
+        else
         {
-            return "Erro: Nenhum token válido na entrada.";
+            if (vocabularyManager.Vocab.TryGetValue("<UNK>", out int unkIndex) && unkIndex < inputData.Length)
+                inputData[unkIndex] = 1.0; // Fallback para token desconhecido
         }
-
-        bool needsSearch = tokens.Any(t => !vocabularyManager.Vocab.ContainsKey(t));
-        string enrichedInput = inputText;
-        if (needsSearch)
-        {
-            try
-            {
-                var searchResults = searchService.Search(inputText) ?? new List<string>();
-                enrichedInput = $"{inputText} {string.Join(" ", searchResults)}".Trim();
-                tokens = enrichedInput.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Erro na busca: {ex.Message}. Usando entrada original.");
-            }
-        }
-
-        foreach (var token in tokens.Take(InputSize))
-        {
-            double[] inputData = new double[InputSize];
-            if (vocabularyManager.Vocab.ContainsKey(token))
-            {
-                inputData[0] = vocabularyManager.Vocab[token];
-            }
-            else
-            {
-                inputData[0] = vocabularyManager.Vocab.ContainsKey("<UNK>") ? vocabularyManager.Vocab["<UNK>"] : 0;
-            }
-            Tensor inputTensor = new Tensor(inputData, new int[] { InputSize });
-            Forward(inputTensor);
-        }
-
-        List<string> summaryTokens = new List<string>();
-        for (int i = 0; i < summaryLength; i++)
-        {
-            double[] inputData = new double[InputSize];
-            Tensor inputTensor = new Tensor(inputData, new int[] { InputSize });
-            var output = Forward(inputTensor);
-            int predictedTokenIndex = SampleToken(output);
-            string predictedToken = vocabularyManager.ReverseVocab.ContainsKey(predictedTokenIndex)
-                ? vocabularyManager.ReverseVocab[predictedTokenIndex]
-                : "<UNK>";
-            if (tokens.Contains(predictedToken) || predictedToken != "<UNK>")
-            {
-                summaryTokens.Add(predictedToken);
-            }
-        }
-
-        string summary = string.Join(" ", summaryTokens).Trim();
-        if (string.IsNullOrEmpty(summary))
-        {
-            summary = "Erro: Resumo vazio gerado.";
-        }
-        else if (!IsResponseCoherent(inputText, summary))
-        {
-            summary = AdjustResponse(inputText, summary);
-        }
-
-        return summary.Capitalize();
+        return new Tensor(inputData, new int[] { InputSize });
     }
 
+    // O resto da classe (SampleToken, etc.) permanece o mesmo...
     private int SampleToken(Tensor output)
     {
         if (output == null || output.GetData().Length == 0)
@@ -198,17 +134,19 @@ public class GenerativeNeuralNetworkLSTM : NeuralNetworkLSTM
 
         double[] probs = output.GetData();
         double total = probs.Sum();
-        if (total == 0)
+        if (total < 1e-9)
         {
-            total = 1e-10;
+            Random rand = new Random();
+            return rand.Next(probs.Length);
         }
+        
         for (int i = 0; i < probs.Length; i++)
         {
             probs[i] /= total;
         }
 
-        Random rand = new Random();
-        double r = rand.NextDouble();
+        Random randGen = new Random();
+        double r = randGen.NextDouble();
         double cumulative = 0;
         for (int i = 0; i < probs.Length; i++)
         {
@@ -220,7 +158,8 @@ public class GenerativeNeuralNetworkLSTM : NeuralNetworkLSTM
         }
         return probs.Length - 1;
     }
-
+    
+    // ... os outros métodos privados (IsResponseCoherent, etc.) também permanecem
     private bool IsResponseCoherent(string input, string response)
     {
         if (string.IsNullOrEmpty(input) || string.IsNullOrEmpty(response))

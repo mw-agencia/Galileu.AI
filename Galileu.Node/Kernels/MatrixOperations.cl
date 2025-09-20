@@ -1,4 +1,3 @@
-#pragma OPENCL EXTENSION cl_khr_fp64 : enable
 
 __kernel void matmul_forward(
     __global const double* A,
@@ -81,5 +80,18 @@ __kernel void tanh_forward(
     if (i < total_elements)
     {
         output[i] = tanh(input[i]);
+    }
+}
+
+// Lembre-se de adicionar o kernel exp_forward que usamos em NeuralNetworkLSTM.cs
+__kernel void exp_forward(
+    __global const double* input,
+    __global double* output,
+    const int total_elements)
+{
+    int i = get_global_id(0);
+    if (i < total_elements)
+    {
+        output[i] = exp(input[i]);
     }
 }

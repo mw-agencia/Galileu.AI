@@ -1,4 +1,7 @@
 using Galileu.Node.Core;
+using Galileu.Node.Brain.Gpu; // Adicionado
+using System; // Adicionado
+using System.IO; // Adicionado
 
 namespace Galileu.Node.Brain;
 
@@ -21,7 +24,8 @@ public class ModelSerializerLSTM
         }
     }
 
-    public static GenerativeNeuralNetworkLSTM LoadModel(string filePath)
+    // CORREÇÃO: O método agora aceita OpenCLService para repassá-lo.
+    public static GenerativeNeuralNetworkLSTM? LoadModel(string filePath, OpenCLService openCLService)
     {
         try
         {
@@ -31,7 +35,8 @@ public class ModelSerializerLSTM
                 return null;
             }
 
-            var baseModel = NeuralNetworkLSTM.LoadModel(filePath);
+            // CORREÇÃO: Passa o openCLService para o método LoadModel da classe base.
+            var baseModel = NeuralNetworkLSTM.LoadModel(filePath, openCLService);
             if (baseModel == null)
             {
                 Console.WriteLine("Falha ao carregar o modelo base LSTM.");
@@ -52,6 +57,7 @@ public class ModelSerializerLSTM
                 return null;
             }
 
+            // CORREÇÃO: Passa o openCLService para o construtor do GenerativeNeuralNetworkLSTM.
             return new GenerativeNeuralNetworkLSTM(
                 baseModel.InputSize,
                 baseModel.HiddenSize,
@@ -70,7 +76,8 @@ public class ModelSerializerLSTM
                 baseModel.BiasOutput,
                 baseModel.WeightsHiddenOutputFinal,
                 baseModel.BiasOutputFinal,
-                vocabManager);
+                vocabManager,
+                openCLService);
         }
         catch (Exception ex)
         {

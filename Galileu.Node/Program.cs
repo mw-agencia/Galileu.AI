@@ -6,6 +6,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using System.Net.Http.Json;
 using System.Net.Sockets;
+using Galileu.Node.Brain.Gpu;
 using Galileu.Node.Services;
 using Microsoft.AspNetCore.Http;
 using Services;
@@ -27,7 +28,7 @@ int GetAvailablePort()
 var myAddress = $"http://localhost:{port}";
 Console.WriteLine($" === Swagger Acess http://localhost:{port}/swagger/index.html ===");
 builder.WebHost.UseUrls(myAddress);
-
+builder.Services.AddSingleton<OpenCLService>();
 builder.Services.AddSingleton(new NodeState(myAddress));
 builder.Services.AddSingleton<PolymorphicTypeResolver>();
 builder.Services.AddSingleton(provider => new NodeClient(provider.GetRequiredService<PolymorphicTypeResolver>()));
