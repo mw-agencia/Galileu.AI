@@ -9,9 +9,7 @@ public class WalletDocument
     [BsonRepresentation(BsonType.ObjectId)]
     public string Id { get; set; }
 
-    [BsonElement("address")]
-    public string Address { get; set; } // A chave pública/endereço da carteira
+    [BsonElement("address")] public string Address { get; set; } // A chave pública/endereço da carteira
 
-    [BsonElement("createdAt")]
-    public DateTime CreatedAt { get; set; }
+    [BsonElement("createdAt")] public DateTime CreatedAt { get; set; }
 }

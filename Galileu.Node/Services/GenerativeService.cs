@@ -15,10 +15,10 @@ public class GenerativeService
     private int _contextWindowSize;
     private string _modelPath = "";
     private ISearchService _searchService = new MockSearchService();
-    
+
     // CORREÇÃO: Adicionamos o OpenCLService como uma dependência do serviço.
     private readonly OpenCLService _openCLService;
-    
+
     public bool IsConfigured { get; private set; } = false;
 
     // CORREÇÃO: Injetamos o OpenCLService através do construtor.
@@ -27,7 +27,8 @@ public class GenerativeService
         _openCLService = openCLService;
     }
 
-    public void Configure(int inputSize, int hiddenSize, int outputSize, int contextWindowSize, string modelPath, ISearchService searchService)
+    public void Configure(int inputSize, int hiddenSize, int outputSize, int contextWindowSize, string modelPath,
+        ISearchService searchService)
     {
         _inputSize = inputSize;
         _hiddenSize = hiddenSize;
@@ -47,7 +48,7 @@ public class GenerativeService
         {
             var jsonString = File.ReadAllText(_modelPath);
             var modelData = JsonSerializer.Deserialize<NeuralNetworkModelDataLSTM>(jsonString);
-            
+
             var vocabManager = new VocabularyManager();
             var vocabSize = vocabManager.LoadVocabulary();
 
@@ -55,8 +56,8 @@ public class GenerativeService
             {
                 int contextWindowSize = 5; // Assumimos o mesmo valor usado no treinamento
                 Configure(
-                    modelData.InputSize, 
-                    modelData.HiddenSize, 
+                    modelData.InputSize,
+                    modelData.HiddenSize,
                     modelData.OutputSize,
                     contextWindowSize,
                     _modelPath,
@@ -65,6 +66,7 @@ public class GenerativeService
                 Console.WriteLine("[GenerativeService] Configuração carregada a partir de um modelo salvo.");
                 return true;
             }
+
             return false;
         }
         catch (Exception ex)
@@ -77,31 +79,41 @@ public class GenerativeService
     public async Task TrainModelAsync(Trainer trainerOptions)
     {
         if (trainerOptions == null) return;
-        
+
         await Task.Run(() =>
         {
+            // CORREÇÃO: Adicionando um try-catch detalhado para capturar qualquer exceção.
             try
             {
                 Console.WriteLine("Criando e treinando o modelo LSTM generativo...");
-                
-                // CORREÇÃO: Passamos o _openCLService para o construtor, que agora espera 6 argumentos.
+
                 var model = new GenerativeNeuralNetworkLSTM(
-                    _inputSize, 
-                    _hiddenSize, 
-                    _outputSize, 
-                    trainerOptions.datasetPath, 
-                    _searchService, 
+                    _inputSize,
+                    _hiddenSize,
+                    _outputSize,
+                    trainerOptions.datasetPath,
+                    _searchService,
                     _openCLService);
-                
+
                 var trainer = new ModelTrainerLSTM(model);
-                trainer.TrainModel(trainerOptions.datasetPath, trainerOptions.learningRate, trainerOptions.epochs, batchSize: 32, contextWindowSize: _contextWindowSize);
-                
-                ModelSerializerLSTM.SaveModel(model, _modelPath);
+                trainer.TrainModel(trainerOptions.datasetPath, trainerOptions.learningRate, trainerOptions.epochs,
+                    batchSize: 32, contextWindowSize: _contextWindowSize);
+
+                model.SaveModel(_modelPath);
                 Console.WriteLine($"Modelo salvo com sucesso em: {_modelPath}");
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Erro durante o treinamento: {ex.Message}\n{ex.StackTrace}");
+                // Este bloco agora irá capturar e imprimir qualquer erro que ocorra
+                // em ModelTrainerLSTM ou em qualquer lugar dentro deste Task.
+                Console.WriteLine("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
+                Console.WriteLine("!!  UM ERRO CRÍTICO OCORREU DURANTE O TREINAMENTO   !!");
+                Console.WriteLine("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
+                Console.WriteLine($"Tipo de Erro: {ex.GetType().Name}");
+                Console.WriteLine($"Mensagem: {ex.Message}");
+                Console.WriteLine("Stack Trace:");
+                Console.WriteLine(ex.StackTrace);
+                Console.WriteLine("--------------------------------------------------------");
             }
         });
     }
@@ -118,6 +130,7 @@ public class GenerativeService
                 {
                     return "Erro: Modelo não pôde ser carregado.";
                 }
+
                 string response = loadedModel.GenerateResponse(generateResponse.input, maxLength: 50);
                 return response;
             }

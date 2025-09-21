@@ -13,6 +13,7 @@ public class ModelSerializerLSTM
         {
             throw new ArgumentNullException(nameof(model));
         }
+
         try
         {
             model.SaveModel(filePath);
@@ -53,7 +54,8 @@ public class ModelSerializerLSTM
 
             if (vocabSize != baseModel.OutputSize)
             {
-                Console.WriteLine($"Tamanho do vocabulário ({vocabSize}) não corresponde ao OutputSize do modelo ({baseModel.OutputSize}).");
+                Console.WriteLine(
+                    $"Tamanho do vocabulário ({vocabSize}) não corresponde ao OutputSize do modelo ({baseModel.OutputSize}).");
                 return null;
             }
 

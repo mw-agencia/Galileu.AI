@@ -16,7 +16,8 @@ public class NodeClient
         _jsonOptions = new JsonSerializerOptions { TypeInfoResolver = _typeResolver };
     }
 
-    public async Task<TResponse> SendRequestAsync<TResponse>(string targetAddress, Message request, CancellationToken token) 
+    public async Task<TResponse> SendRequestAsync<TResponse>(string targetAddress, Message request,
+        CancellationToken token)
         where TResponse : Message
     {
         using var ws = new ClientWebSocket();

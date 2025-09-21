@@ -39,7 +39,8 @@ public class GenerativeController : ControllerBase
             var vocabManager = new VocabularyManager();
             if (!System.IO.File.Exists(vocabManager.VocabFilePath))
             {
-                Console.WriteLine("[GenerativeController] Vocabulário não encontrado. Criando a partir do dataset fornecido...");
+                Console.WriteLine(
+                    "[GenerativeController] Vocabulário não encontrado. Criando a partir do dataset fornecido...");
                 vocabManager.BuildVocabulary(trainer.datasetPath);
             }
 
@@ -51,9 +52,10 @@ public class GenerativeController : ControllerBase
             }
 
             // 3. Configura o serviço com os parâmetros corretos e dinâmicos.
-            Console.WriteLine($"[GenerativeController] Vocabulário pronto. Tamanho: {vocabSize} tokens. Configurando o serviço...");
+            Console.WriteLine(
+                $"[GenerativeController] Vocabulário pronto. Tamanho: {vocabSize} tokens. Configurando o serviço...");
             int contextWindowSize = 5;
-            int inputSize = contextWindowSize * vocabSize;
+            int inputSize = vocabSize;
             int hiddenSize = 128;
             int outputSize = vocabSize;
             var modelSavePath = Path.Combine(Environment.CurrentDirectory, "Dayson", "Dayson.json");
@@ -84,9 +86,11 @@ public class GenerativeController : ControllerBase
         {
             if (!_generativeService.TryLoadConfigurationFromModel())
             {
-                return BadRequest("O serviço não está configurado. Treine um modelo primeiro usando o endpoint /trainer.");
+                return BadRequest(
+                    "O serviço não está configurado. Treine um modelo primeiro usando o endpoint /trainer.");
             }
         }
+
         var response = await _generativeService.GenerateAsync(generateResponse);
         return Ok(response);
     }

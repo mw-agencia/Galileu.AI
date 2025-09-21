@@ -13,7 +13,7 @@ public class CommandController : ControllerBase
     {
         _nodeRegistryService = nodeRegistryService;
     }
-    
+
     [HttpGet]
     public IActionResult Get()
     {

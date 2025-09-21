@@ -21,6 +21,7 @@ public class NodeController : ControllerBase
     {
         return Ok("Controlador funcionando!");
     }
+
     [HttpPost("register")]
     public IActionResult RegisterNode([FromBody] NodeRegistrationRequest request)
     {
@@ -31,7 +32,8 @@ public class NodeController : ControllerBase
             request.NodeAddress,
             request.Specializations
         );
-        Console.WriteLine($"[NodeController] Requisição de registro de nó recebida: ID={request.NodeId}, Endereço={request.NodeAddress}");
+        Console.WriteLine(
+            $"[NodeController] Requisição de registro de nó recebida: ID={request.NodeId}, Endereço={request.NodeAddress}");
         return Ok($"Nó {request.NodeId} registrado com sucesso.");
     }
 

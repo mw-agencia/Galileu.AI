@@ -12,12 +12,11 @@ public class WalletService
     private readonly IMongoCollection<TransactionDocument> _transactions;
     private readonly IMongoCollection<WalletDocument> _wallets;
     private readonly ILogger<WalletService> _logger;
-    
+
     public WalletService(IOptions<object> mongoSettings, ILogger<WalletService> logger)
     {
-        
     }
-    
+
     // Método para criar e armazenar uma nova carteira
     public async Task CreateWalletAsync(string address)
     {
@@ -29,12 +28,12 @@ public class WalletService
         await _wallets.InsertOneAsync(wallet);
         _logger.LogInformation("Nova carteira criada e armazenada no DB para o endereço: {Address}", address);
     }
-    
+
     public async Task CreateTransactionAsync(string fromAddress, string toAddress, decimal amount, string? notes = null)
     {
         await Task.CompletedTask;
     }
-    
+
     private string NormalizeWalletAddress(string walletAddress)
     {
         if (string.IsNullOrWhiteSpace(walletAddress))
@@ -48,7 +47,7 @@ public class WalletService
 
         return decoded;
     }
-    
+
     public async Task<decimal> GetBalanceAsync(string walletAddress)
     {
         try
@@ -60,12 +59,13 @@ public class WalletService
             var sentTask = _transactions.AsQueryable()
                 .Where(t => t.fromAddress == walletAddress)
                 .SumAsync(t => t.amount);
-                
+
             await Task.WhenAll(receivedTask, sentTask);
 
             var balance = receivedTask.Result - sentTask.Result;
-            
-            _logger.LogDebug("Saldo calculado para carteira (hash: {Hash}): Recebido={Received}, Enviado={Sent}, Saldo={Balance}", 
+
+            _logger.LogDebug(
+                "Saldo calculado para carteira (hash: {Hash}): Recebido={Received}, Enviado={Sent}, Saldo={Balance}",
                 walletAddress.GetHashCode(), receivedTask.Result, sentTask.Result, balance);
 
             return balance;
@@ -90,7 +90,7 @@ public class WalletService
                 .SortByDescending(t => t.timestamp)
                 .ToListAsync();
 
-            _logger.LogDebug("Histórico obtido para carteira (hash: {Hash}): {Count} transações", 
+            _logger.LogDebug("Histórico obtido para carteira (hash: {Hash}): {Count} transações",
                 walletAddress.GetHashCode(), transactions.Count);
 
             return transactions;
@@ -101,6 +101,7 @@ public class WalletService
             throw;
         }
     }
+
     /// <summary>
     /// Obtém o número total de transações de uma carteira
     /// </summary>
@@ -115,7 +116,7 @@ public class WalletService
 
             var count = (int)await _transactions.CountDocumentsAsync(filter);
 
-            _logger.LogDebug("Contagem de transações para carteira (hash: {Hash}): {Count}", 
+            _logger.LogDebug("Contagem de transações para carteira (hash: {Hash}): {Count}",
                 walletAddress.GetHashCode(), count);
 
             return count;
@@ -137,14 +138,15 @@ public class WalletService
             var wallet = await _wallets.Find(w => w.Address == walletAddress).FirstOrDefaultAsync();
             var exists = wallet != null;
 
-            _logger.LogDebug("Verificação de existência da carteira (hash: {Hash}): {Exists}", 
+            _logger.LogDebug("Verificação de existência da carteira (hash: {Hash}): {Exists}",
                 walletAddress.GetHashCode(), exists);
 
             return exists;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Erro ao verificar existência da carteira (hash: {Hash})", walletAddress.GetHashCode());
+            _logger.LogError(ex, "Erro ao verificar existência da carteira (hash: {Hash})",
+                walletAddress.GetHashCode());
             throw;
         }
     }
@@ -158,7 +160,7 @@ public class WalletService
         {
             var wallet = await _wallets.Find(w => w.Address == walletAddress).FirstOrDefaultAsync();
 
-            _logger.LogDebug("Informações da carteira obtidas (hash: {Hash}): {Found}", 
+            _logger.LogDebug("Informações da carteira obtidas (hash: {Hash}): {Found}",
                 walletAddress.GetHashCode(), wallet != null);
 
             return wallet;
@@ -169,7 +171,7 @@ public class WalletService
             throw;
         }
     }
-    
+
     public async Task<IEnumerable<TransactionDocument>> GetFullLedgerAsync()
     {
         try

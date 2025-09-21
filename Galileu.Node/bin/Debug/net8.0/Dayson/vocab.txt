@@ -68,7 +68,6 @@ agrupa
 agrupamento
 agrupar
 água
-ai
 aime
 ainda
 ajuda
@@ -164,6 +163,7 @@ as
 asimov
 assim
 assimétrica
+assistente
 assistentes
 associação
 associam
@@ -1400,6 +1400,7 @@ oferece
 oferecendo
 oferecer
 ofertas
+oi
 olá
 olhos
 onde
@@ -1638,6 +1639,7 @@ projeto
 projetos
 promissor
 pronta
+pronto
 pronúncia
 propõe
 propósito
@@ -1755,6 +1757,7 @@ requerem
 resíduos
 resiliente
 resistências
+resistênciasbom
 resolução
 resolva
 resolve
@@ -2048,6 +2051,7 @@ triste
 troca
 trocam
 troquem
+tudo
 turing
 turismo
 turísticos

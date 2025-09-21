@@ -1,4 +1,5 @@
 // Localização: Galileu.Node.Models/Messages.cs
+
 using System.Text.Json.Serialization;
 using Akka.Actor;
 
@@ -18,14 +19,17 @@ public abstract record Message(Guid CorrelationId);
 
 // --- Requisições P2P ---
 public record AuthRequest(Guid CorrelationId, string NodeJwt) : Message(CorrelationId);
+
 public record GossipSyncRequest(Guid CorrelationId, List<string> KnownPeers, string AuthToken) : Message(CorrelationId);
+
 public record PingRequest(Guid CorrelationId, string FromNodeId, string AuthToken) : Message(CorrelationId);
 
 // --- Respostas P2P ---
 public record AuthResponse(Guid CorrelationId, bool Success, string Message) : Message(CorrelationId);
-public record GossipSyncResponse(Guid CorrelationId, List<string> KnownPeers) : Message(CorrelationId);
-public record PongResponse(Guid CorrelationId, string Message) : Message(CorrelationId);
 
+public record GossipSyncResponse(Guid CorrelationId, List<string> KnownPeers) : Message(CorrelationId);
+
+public record PongResponse(Guid CorrelationId, string Message) : Message(CorrelationId);
 
 // ####################################################################
 // ## MENSAGENS PARA O CONSENSO DE ATORES (Akka.NET)                 ##
@@ -34,10 +38,17 @@ public record PongResponse(Guid CorrelationId, string Message) : Message(Correla
 // ####################################################################
 
 public record ProcessTaskRequest(string Prompt, Guid TaskId);
+
 public record StartConsensusRound(Guid TaskId, string[] Subtasks, IActorRef Worker, List<IActorRef> SelectedNodes);
+
 public record ProcessSubtask(Guid TaskId, int SubtaskIndex, string Content);
+
 public record SubtaskResult(Guid TaskId, int SubtaskIndex, string Fragment, IActorRef Node);
+
 public record RequestValidation(Guid TaskId, SubtaskResult FragmentToValidate);
+
 public record ValidationVote(Guid TaskId, int SubtaskIndex, bool IsValid, IActorRef Voter);
+
 public record ConsensusReached(Guid TaskId, List<SubtaskResult> ValidatedFragments);
+
 public record ConsensusFailed(Guid TaskId, string Reason);

@@ -40,15 +40,14 @@ builder.Services.AddSingleton<ActorSystemSingleton>();
 builder.Services.AddHostedService<AkkaHostedService>();
 builder.Services.AddControllers();
 
-builder.Services.AddEndpointsApiExplorer(); 
+builder.Services.AddEndpointsApiExplorer();
 
 builder.Services.AddSwaggerGen(options =>
 {
-    
-    options.SwaggerDoc("v1", new Microsoft.OpenApi.Models.OpenApiInfo 
-    { 
-        Title = "Dyson Node API", 
-        Version = "v1" 
+    options.SwaggerDoc("v1", new Microsoft.OpenApi.Models.OpenApiInfo
+    {
+        Title = "Dyson Node API",
+        Version = "v1"
     });
 });
 
@@ -62,12 +61,10 @@ app.UseSwaggerUI(options =>
 });
 
 app.UseWebSockets();
-app.MapControllers(); 
+app.MapControllers();
 
-app.MapGet("/ws", async (HttpContext context) =>
-{
-    
-});
+app.MapGet("/ws", async (HttpContext context) => { });
+
 async Task<Message?> HandleMessage(Message? receivedMessage, NodeState state, NodeClient client)
 {
     switch (receivedMessage)
@@ -107,12 +104,13 @@ async Task BootstrapNodeAsync(IServiceProvider services, string[] args)
 
         nodeState.NodeJwt = regResponse.NodeJwt;
         nodeState.MergePeers(regResponse.InitialPeers);
-        
+
         Console.WriteLine("Nó validado pelo Orquestrador. JWT recebido e rede P2P iniciada.");
         nodeState.PrintStatus();
     }
     catch (Exception ex)
     {
-        Console.WriteLine($"ERRO CRÍTICO no registro: {ex.Message}. O nó não pode se juntar à rede e permanecerá em modo de espera.");
+        Console.WriteLine(
+            $"ERRO CRÍTICO no registro: {ex.Message}. O nó não pode se juntar à rede e permanecerá em modo de espera.");
     }
 }

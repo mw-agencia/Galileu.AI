@@ -20,13 +20,12 @@ public class WalletController : ControllerBase
         _walletService = walletService;
         _logger = logger;
     }
-    
+
     [HttpPost("balance")]
     public async Task<IActionResult> GetBalance([FromBody] WalletRequest request)
     {
         try
         {
-            
             if (request == null || string.IsNullOrWhiteSpace(request.WalletAddress))
                 return BadRequest(new { Message = "Endereço da carteira é obrigatório." });
 
@@ -46,7 +45,7 @@ public class WalletController : ControllerBase
             return StatusCode(500, new { Message = "Erro inesperado ao processar sua solicitação." });
         }
     }
-    
+
     /// <summary>
     /// Consulta o histÃ³rico de transaÃ§Ãµes de uma carteira. O endereÃ§o deve ser codificado em Base64Url.
     /// </summary>
@@ -68,7 +67,7 @@ public class WalletController : ControllerBase
             return StatusCode(500, new { Message = "Erro inesperado ao processar sua solicitação." });
         }
     }
-    
+
     private static string EncodeBase64Url(string input)
     {
         var bytes = Encoding.UTF8.GetBytes(input);

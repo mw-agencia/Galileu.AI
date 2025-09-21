@@ -36,23 +36,26 @@ public class GossipService : IHostedService, IDisposable
 
         var otherPeers = _nodeState.GetKnownPeers().Where(p => p != _nodeState.Address).ToList();
         if (!otherPeers.Any()) return;
-        
+
         var targetPeerAddress = otherPeers[_random.Next(otherPeers.Count)];
 
         try
         {
             _logger.LogInformation("Tentando fofocar com o par: {TargetPeer}", targetPeerAddress);
             var request = new GossipSyncRequest(Guid.NewGuid(), _nodeState.GetKnownPeers(), _nodeState.NodeJwt);
-            
+
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-            var response = await _nodeClient.SendRequestAsync<GossipSyncResponse>(targetPeerAddress, request, cts.Token);
-            
+            var response =
+                await _nodeClient.SendRequestAsync<GossipSyncResponse>(targetPeerAddress, request, cts.Token);
+
             _nodeState.MergePeers(response.KnownPeers);
-            _logger.LogInformation("Fofoca com {TargetPeer} bem-sucedida. Total de pares conhecidos: {PeerCount}", targetPeerAddress, _nodeState.GetKnownPeers().Count);
+            _logger.LogInformation("Fofoca com {TargetPeer} bem-sucedida. Total de pares conhecidos: {PeerCount}",
+                targetPeerAddress, _nodeState.GetKnownPeers().Count);
         }
         catch (Exception ex)
         {
-            _logger.LogWarning("Falha ao fofocar com o par {TargetPeer}. Razão: {ErrorType}", targetPeerAddress, ex.GetType().Name);
+            _logger.LogWarning("Falha ao fofocar com o par {TargetPeer}. Razão: {ErrorType}", targetPeerAddress,
+                ex.GetType().Name);
             _nodeState.RemovePeer(targetPeerAddress);
         }
     }

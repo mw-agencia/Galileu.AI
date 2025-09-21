@@ -10,7 +10,8 @@ public class NodeRegistryService
     private readonly ConcurrentDictionary<IActorRef, NodeInfo> _registry = new();
 
     // CORRIGIDO: A assinatura do método deve aceitar 4 parâmetros
-    public void RegisterNode(IActorRef nodeActor, string walletAddress, string networkAddress, IEnumerable<string> specializations)
+    public void RegisterNode(IActorRef nodeActor, string walletAddress, string networkAddress,
+        IEnumerable<string> specializations)
     {
         var nodeInfo = new NodeInfo(
             nodeActor,

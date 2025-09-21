@@ -32,6 +32,7 @@ public class OpenCLService : IDisposable
                 IsGpuAvailable = false;
                 return;
             }
+
             Platform platform = platforms.First();
 
             // 2. Encontrar um dispositivo de GPU
@@ -42,6 +43,7 @@ public class OpenCLService : IDisposable
                 IsGpuAvailable = false;
                 return;
             }
+
             Device = devices.First();
 
             string deviceName = Cl.GetDeviceInfo(Device.Value, DeviceInfo.Name, out error).ToString();
@@ -53,9 +55,11 @@ public class OpenCLService : IDisposable
 
             CommandQueue = Cl.CreateCommandQueue(Context.Value, Device.Value, CommandQueueProperties.None, out error);
             if (error != ErrorCode.Success) throw new Exception($"Erro ao criar fila de comandos: {error}");
-            
+
             // 4. Carregar e compilar o programa do kernel
-            byte[] kernelBytes = File.ReadAllBytes("/home/mplopes/Documentos/GitHub/Galileu.AI/Galileu.Node/Kernels/MatrixOperations.cl");
+            byte[] kernelBytes =
+                File.ReadAllBytes(
+                    "/home/mplopes/Documentos/GitHub/Galileu.AI/Galileu.Node/Kernels/MatrixOperations.cl");
             string kernelSource = new UTF8Encoding(false).GetString(kernelBytes);
 
             program = Cl.CreateProgramWithSource(Context.Value, 1, new[] { kernelSource }, null, out error);
@@ -63,7 +67,7 @@ public class OpenCLService : IDisposable
 
             // CORREÇÃO: Se a linha acima for bem-sucedida, marcamos a flag como true.
             programCreated = true;
-            
+
             error = Cl.BuildProgram(program, 1, new[] { Device.Value }, "", null, IntPtr.Zero);
             if (error != ErrorCode.Success)
             {
@@ -72,7 +76,8 @@ public class OpenCLService : IDisposable
             }
 
             // 5. Extrair todos os kernels
-            string[] kernelNames = {
+            string[] kernelNames =
+            {
                 "matmul_forward", "elementwise_add_forward", "elementwise_add_broadcast_forward",
                 "elementwise_multiply", "sigmoid_forward", "tanh_forward", "exp_forward"
             };

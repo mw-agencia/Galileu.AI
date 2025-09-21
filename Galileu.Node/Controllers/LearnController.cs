@@ -8,8 +8,8 @@ public class LearnController : ControllerBase
 {
     public LearnController()
     {
-        
     }
+
     [HttpGet]
     public IActionResult Get()
     {

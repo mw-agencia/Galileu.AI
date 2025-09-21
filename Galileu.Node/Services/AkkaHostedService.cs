@@ -43,7 +43,7 @@ public class AkkaHostedService : IHostedService
             var services = scope.ServiceProvider;
             var registry = services.GetRequiredService<NodeRegistryService>();
             var specializations = new[] { "Tradução", "Geração de Código" };
-            
+
             _actorSystem.ActorOf(
                 Props.Create(() => new SpecializedNodeActor(specializations, registry, nodeState)),
                 $"specialized-node-{nodeState.Id.Substring(0, 8)}"

@@ -14,8 +14,8 @@ public class SpecializedNodeActor : ReceiveActor
     private readonly string _nodeId;
 
     public SpecializedNodeActor(
-        IEnumerable<string> specializations, 
-        NodeRegistryService registryService, 
+        IEnumerable<string> specializations,
+        NodeRegistryService registryService,
         NodeState nodeState)
     {
         _specializations = specializations;
@@ -31,19 +31,20 @@ public class SpecializedNodeActor : ReceiveActor
         {
             var specsString = string.Join(", ", _specializations);
             Console.WriteLine($"[Actor {_nodeId}/{specsString}] Recebeu subtarefa '{msg.Content}'.");
-            
+
             var fragment = $"<fragment_from:{_nodeId}>";
-            
+
             Sender.Tell(new SubtaskResult(msg.TaskId, msg.SubtaskIndex, fragment, Self));
         });
 
         Receive<RequestValidation>(msg =>
         {
-            Console.WriteLine($"[Actor {_nodeId}] Recebeu pedido para validar o fragmento: '{msg.FragmentToValidate.Fragment}'");
-                
+            Console.WriteLine(
+                $"[Actor {_nodeId}] Recebeu pedido para validar o fragmento: '{msg.FragmentToValidate.Fragment}'");
+
             bool isValid = !string.IsNullOrWhiteSpace(msg.FragmentToValidate.Fragment);
             Console.WriteLine($"[Actor {_nodeId}] Votando. Voto: {(isValid ? "Válido" : "Inválido")}");
-            
+
             Sender.Tell(new ValidationVote(msg.TaskId, msg.FragmentToValidate.SubtaskIndex, isValid, Self));
         });
     }

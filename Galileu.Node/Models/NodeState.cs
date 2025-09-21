@@ -8,7 +8,7 @@ public class NodeState
     public string Address { get; }
     public string? NodeJwt { get; set; }
     private readonly ConcurrentDictionary<string, DateTime> _knownPeers = new();
-    
+
 
     public NodeState(string address)
     {
@@ -30,7 +30,7 @@ public class NodeState
             .Select(p => p.Key)
             .ToList();
     }
-    
+
     /// <summary>
     /// Mescla uma lista de pares recebidos com nossa lista local.
     /// </summary>
@@ -52,6 +52,7 @@ public class NodeState
         // Para depuração: Console.WriteLine(string.Join(", ", GetKnownPeers()));
         Console.WriteLine("------------------------------------------\n");
     }
+
     public void RemovePeer(string peerAddress)
     {
         if (_knownPeers.TryRemove(peerAddress, out _))

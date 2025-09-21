@@ -46,14 +46,14 @@ public class VocabularyManager
                 tokens.Add(match.Value);
             }
         }
-        
+
         // Adiciona tokens especiais se não existirem
         tokens.Add("<PAD>"); // Padding
         tokens.Add("<UNK>"); // Unknown token
 
         vocab.Clear();
         reverseVocab.Clear();
-        
+
         // Garante que o diretório exista antes de escrever o arquivo
         var directory = Path.GetDirectoryName(VocabFilePath);
         if (directory != null && !Directory.Exists(directory))

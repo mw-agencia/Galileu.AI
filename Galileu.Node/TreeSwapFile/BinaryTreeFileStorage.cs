@@ -13,14 +13,14 @@ public class BinaryTreeFileStorage : IDisposable
     public BinaryTreeFileStorage(string filePath)
     {
         _filePath = filePath;
-        
+
         var directory = Path.GetDirectoryName(_filePath);
         if (directory != null && !Directory.Exists(directory))
         {
             Directory.CreateDirectory(directory);
         }
     }
-    
+
     // Escreve um único dado usando um FileStream já aberto.
     public long StoreData(string data, FileStream fileStream)
     {
@@ -51,7 +51,7 @@ public class BinaryTreeFileStorage : IDisposable
             _lock.ExitWriteLock();
         }
     }
-    
+
     // Lê um único dado, abrindo e fechando o arquivo sob demanda.
     public string GetData(long id)
     {
@@ -65,7 +65,7 @@ public class BinaryTreeFileStorage : IDisposable
             {
                 return Encoding.UTF8.GetString(node.Data);
             }
-            
+
             using (var fileStream = new FileStream(_filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
             {
                 fileStream.Seek(node.Offset, SeekOrigin.Begin);
@@ -84,7 +84,7 @@ public class BinaryTreeFileStorage : IDisposable
     {
         _lock?.Dispose();
     }
-    
+
     private TreeNode InsertNode(TreeNode current, TreeNode newNode)
     {
         if (current == null) return newNode;

@@ -20,7 +20,7 @@ public class GalileuApiClient
         _httpClient = new HttpClient
         {
             // O endereço da API central é lido da configuração.
-            BaseAddress = new Uri(configuration["GalileuApi:BaseUrl"] 
+            BaseAddress = new Uri(configuration["GalileuApi:BaseUrl"]
                                   ?? "http://localhost:5001")
         };
     }
@@ -31,11 +31,11 @@ public class GalileuApiClient
         {
             // A chave precisa ser codificada para URL para evitar problemas com caracteres especiais.
             var encodedAddress = System.Web.HttpUtility.UrlEncode(walletAddress);
-            
+
             // A rota deve ser consistente com a definida no WalletController.
             // Assumindo a rota /api/wallet/balance?address=...
             var response = await _httpClient.GetAsync($"/api/wallet/balance?address={encodedAddress}");
-            
+
             response.EnsureSuccessStatusCode();
             return await response.Content.ReadFromJsonAsync<BalanceResponseDto>();
         }
@@ -52,7 +52,7 @@ public class GalileuApiClient
         {
             var encodedAddress = System.Web.HttpUtility.UrlEncode(walletAddress);
             var response = await _httpClient.GetAsync($"/api/wallet/history?address={encodedAddress}");
-            
+
             response.EnsureSuccessStatusCode();
             return await response.Content.ReadFromJsonAsync<IEnumerable<TransactionDocument>>();
         }

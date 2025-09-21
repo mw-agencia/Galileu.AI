@@ -2,7 +2,9 @@ using Galileu.Node.Core;
 
 namespace Galileu.Node.Interfaces;
 
-public interface IMathTensor : IDisposable { }
+public interface IMathTensor : IDisposable
+{
+}
 
 public interface IMathEngine : IDisposable
 {
