@@ -5,7 +5,7 @@ namespace Galileu.Node.Brain;
 
 public class ModelTrainerLSTM
 {
-    private readonly GenerativeNeuralNetworkLSTM model;
+    public readonly GenerativeNeuralNetworkLSTM model;
 
     public ModelTrainerLSTM(GenerativeNeuralNetworkLSTM model)
     {

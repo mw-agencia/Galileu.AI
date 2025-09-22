@@ -21,7 +21,7 @@ public class GenerativeController : ControllerBase
     [HttpGet]
     public IActionResult Get()
     {
-        return Ok("GenerativeController está pronto. Chame o endpoint /trainer para iniciar.");
+        return Ok("GenerativeController está pronto. Chame o endpoint trainer para iniciar.");
     }
 
     // O endpoint build-vocabulary foi removido, pois sua lógica agora está no /trainer.
@@ -82,15 +82,46 @@ public class GenerativeController : ControllerBase
     [HttpPost("generate")]
     public async Task<IActionResult> Generate([FromBody] GenerateResponse generateResponse)
     {
+        var vocabManager = new VocabularyManager();
+        if (!System.IO.File.Exists(vocabManager.VocabFilePath))
+        {
+            Console.WriteLine(
+                "[GenerativeController] Vocabulário não encontrado...");
+        }
+
+        // 2. Carrega o vocabulário para obter seu tamanho.
+        int vocabSize = vocabManager.LoadVocabulary();
+        if (vocabSize == 0)
+        {
+            return StatusCode(500, "Falha ao construir ou carregar o vocabulário. O dataset pode estar vazio.");
+        }
+
+        // 3. Configura o serviço com os parâmetros corretos e dinâmicos.
+        Console.WriteLine(
+            $"[GenerativeController] Vocabulário pronto. Tamanho: {vocabSize} tokens. Configurando o serviço...");
+        int contextWindowSize = 5;
+        int inputSize = vocabSize;
+        int hiddenSize = 128;
+        int outputSize = vocabSize;
+        var modelSavePath = Path.Combine(Environment.CurrentDirectory, "Dayson", "Dayson.json");
+
+        _generativeService.Configure(
+            inputSize,
+            hiddenSize,
+            outputSize,
+            contextWindowSize,
+            modelSavePath,
+            new MockSearchService()
+        );
+        
         if (!_generativeService.IsConfigured)
         {
             if (!_generativeService.TryLoadConfigurationFromModel())
             {
-                return BadRequest(
-                    "O serviço não está configurado. Treine um modelo primeiro usando o endpoint /trainer.");
+                return BadRequest("O serviço não está configurado. Treine um modelo primeiro usando o endpoint /trainer.");
             }
         }
-
+        
         var response = await _generativeService.GenerateAsync(generateResponse);
         return Ok(response);
     }

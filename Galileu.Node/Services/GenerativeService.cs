@@ -13,7 +13,7 @@ public class GenerativeService
     private int _hiddenSize;
     private int _outputSize;
     private int _contextWindowSize;
-    private string _modelPath = "";
+    private string _modelPath = Path.Combine(Environment.CurrentDirectory, "Dayson", "Dayson.json");
     private ISearchService _searchService = new MockSearchService();
 
     // CORREÇÃO: Adicionamos o OpenCLService como uma dependência do serviço.
@@ -85,22 +85,37 @@ public class GenerativeService
             // CORREÇÃO: Adicionando um try-catch detalhado para capturar qualquer exceção.
             try
             {
-                Console.WriteLine("Criando e treinando o modelo LSTM generativo...");
+                if (File.Exists(_modelPath))
+                {
+                    Console.WriteLine("Continuando o treinando o modelo LSTM generativo...");
+                    var modelData = ModelSerializerLSTM.LoadModel(_modelPath, _openCLService);
 
-                var model = new GenerativeNeuralNetworkLSTM(
-                    _inputSize,
-                    _hiddenSize,
-                    _outputSize,
-                    trainerOptions.datasetPath,
-                    _searchService,
-                    _openCLService);
+                    var trainer = new ModelTrainerLSTM(modelData);
+                    trainer.TrainModel(trainerOptions.datasetPath, trainerOptions.learningRate, trainerOptions.epochs,
+                        batchSize: 32, contextWindowSize: _contextWindowSize);
 
-                var trainer = new ModelTrainerLSTM(model);
-                trainer.TrainModel(trainerOptions.datasetPath, trainerOptions.learningRate, trainerOptions.epochs,
-                    batchSize: 32, contextWindowSize: _contextWindowSize);
+                    ModelSerializerLSTM.SaveModel(trainer.model, _modelPath);
+                    Console.WriteLine($"Modelo salvo com sucesso em: {_modelPath}");
+                }
+                else
+                {
+                    Console.WriteLine("Criando e treinando o modelo LSTM generativo...");
 
-                model.SaveModel(_modelPath);
-                Console.WriteLine($"Modelo salvo com sucesso em: {_modelPath}");
+                    var model = new GenerativeNeuralNetworkLSTM(
+                        _inputSize,
+                        _hiddenSize,
+                        _outputSize,
+                        trainerOptions.datasetPath,
+                        _searchService,
+                        _openCLService);
+
+                    var trainer = new ModelTrainerLSTM(model);
+                    trainer.TrainModel(trainerOptions.datasetPath, trainerOptions.learningRate, trainerOptions.epochs,
+                        batchSize: 32, contextWindowSize: _contextWindowSize);
+
+                    model.SaveModel(_modelPath);
+                    Console.WriteLine($"Modelo salvo com sucesso em: {_modelPath}");
+                }
             }
             catch (Exception ex)
             {
