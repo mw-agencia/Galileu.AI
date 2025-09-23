@@ -23,6 +23,7 @@ public class ModelTrainerLSTM
             throw new InvalidOperationException("O arquivo de dataset está vazio.");
 
         var swapFilePath = Path.Combine(Environment.CurrentDirectory, "Dayson", "memory.bin");
+        Console.WriteLine($"{nameof(TrainModel)} >> {swapFilePath}");
 
         using (var datasetService = new DatasetService(swapFilePath))
         {

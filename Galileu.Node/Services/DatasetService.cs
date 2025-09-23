@@ -28,29 +28,31 @@ public class DatasetService : IDisposable
         int batchSize,
         double validationSplit)
     {
-        var allSamplesStream =
-            StreamAllSamplesAsJson(fullDatasetText, contextWindowSize, tokenToIndex, padToken).ToList();
+        _memoryStorage.Clear();
 
-        List<long> allOffsets;
+        var allSamplesStream = StreamAllSamplesAsJson(fullDatasetText, contextWindowSize, tokenToIndex, padToken);
+
+        List<long> allOffsets = new List<long>();
         int count = 0;
         Action<int> progressCallback = c => Console.Write($"\r[DatasetService] Amostras armazenadas: {c}");
-
-        using (var fileStream = new FileStream(_swapFilePath, FileMode.Create, FileAccess.Write, FileShare.None))
+        
+        foreach (var sampleJson in allSamplesStream)
         {
-            allOffsets = allSamplesStream
-                .Select(sampleJson =>
-                {
-                    count++;
-                    progressCallback(count);
-                    // A chamada original aqui estava incorreta, a API de BinaryTreeFileStorage
-                    // espera o stream como parâmetro.
-                    return _memoryStorage.StoreData(sampleJson, fileStream);
-                })
-                .ToList();
+            long offsetId = _memoryStorage.StoreData(sampleJson);
+            
+            // CORREÇÃO: Apenas adiciona o offset à lista se ele for válido (não -1).
+            if (offsetId != -1)
+            {
+                allOffsets.Add(offsetId);
+            }
+            
+            count++;
+            progressCallback(count);
         }
 
-        Console.WriteLine($"\n[DatasetService] Armazenamento concluído. {allOffsets.Count} amostras totais.");
+        Console.WriteLine($"\n[DatasetService] Armazenamento concluído. {allOffsets.Count} amostras válidas totais.");
 
+        // O resto do método permanece o mesmo...
         int trainSampleCount = (int)(allOffsets.Count * (1 - validationSplit));
         var trainOffsets = allOffsets.Take(trainSampleCount).ToList();
         var validationOffsets = allOffsets.Skip(trainSampleCount).ToList();
