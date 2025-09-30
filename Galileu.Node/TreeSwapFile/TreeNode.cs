@@ -4,7 +4,7 @@ namespace Galileu.Node.TreeSwapFile;
 
 public class TreeNode
 {
-    public const int MaxDataSize = 1 * 1024 * 1024; // 1 Megabytes por amostra
+    public const int MaxDataSize = 50 * 1024; // 1 Megabytes por amostra
     public static readonly int NodeSize = sizeof(long) * 3 + MaxDataSize;
 
     public long LeftOffset;

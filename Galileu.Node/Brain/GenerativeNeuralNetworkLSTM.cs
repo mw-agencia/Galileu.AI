@@ -1,6 +1,8 @@
 using Galileu.Node.Core;
 using Galileu.Node.Interfaces;
-using Galileu.Node.Brain.Gpu;
+using System;
+using System.Collections.Generic;
+using System.Linq;
 
 namespace Galileu.Node.Brain;
 
@@ -9,9 +11,11 @@ public class GenerativeNeuralNetworkLSTM : NeuralNetworkLSTM
     private readonly VocabularyManager vocabularyManager;
     private readonly ISearchService searchService;
 
+    // --- CORREÇÃO: Construtor para criar um novo modelo para treinamento ---
+    // Agora aceita IMathEngine em vez de OpenCLService.
     public GenerativeNeuralNetworkLSTM(int inputSize, int hiddenSize, int outputSize, string datasetPath,
-        ISearchService? searchService, OpenCLService? openCLService)
-        : base(inputSize, hiddenSize, outputSize, openCLService)
+        ISearchService? searchService, IMathEngine mathEngine)
+        : base(inputSize, hiddenSize, outputSize, mathEngine) // Passa a engine para a classe base
     {
         this.vocabularyManager = new VocabularyManager();
         this.searchService = searchService ?? new MockSearchService();
@@ -35,25 +39,31 @@ public class GenerativeNeuralNetworkLSTM : NeuralNetworkLSTM
         }
     }
 
-    public GenerativeNeuralNetworkLSTM(int inputSize, int hiddenSize, int outputSize,
-        Tensor weightsInputForget, Tensor weightsHiddenForget,
-        Tensor weightsInputInput, Tensor weightsHiddenInput,
-        Tensor weightsInputCell, Tensor weightsHiddenCell,
-        Tensor weightsInputOutput, Tensor weightsHiddenOutput,
-        Tensor biasForget, Tensor biasInput, Tensor biasCell, Tensor biasOutput,
-        Tensor weightsHiddenOutputFinal, Tensor biasOutputFinal,
-        VocabularyManager vocabManager,
-        OpenCLService? openCLService)
-        : base(inputSize, hiddenSize, outputSize,
-            weightsInputForget, weightsHiddenForget, weightsInputInput, weightsHiddenInput,
-            weightsInputCell, weightsHiddenCell, weightsInputOutput, weightsHiddenOutput,
-            biasForget, biasInput, biasCell, biasOutput,
-            weightsHiddenOutputFinal, biasOutputFinal,
-            openCLService)
+    // --- CORREÇÃO: Novo construtor para "envolver" um modelo base já carregado ---
+    // Este é o construtor que o ModelSerializerLSTM usará.
+    public GenerativeNeuralNetworkLSTM(NeuralNetworkLSTM baseModel, VocabularyManager vocabManager, ISearchService? searchService)
+        // Chama o construtor protegido da classe base (NeuralNetworkLSTM) para transferir
+        // os pesos e a configuração que já foram carregados.
+        : base(
+              baseModel.InputSize, 
+              baseModel.HiddenSize, 
+              baseModel.OutputSize,
+              // As propriedades a seguir precisam ser públicas na classe NeuralNetworkLSTM
+              baseModel.WeightsInputForget, baseModel.WeightsHiddenForget,
+              baseModel.WeightsInputInput, baseModel.WeightsHiddenInput,
+              baseModel.WeightsInputCell, baseModel.WeightsHiddenCell,
+              baseModel.WeightsInputOutput, baseModel.WeightsHiddenOutput,
+              baseModel.BiasForget, baseModel.BiasInput,
+              baseModel.BiasCell, baseModel.BiasOutput,
+              baseModel.WeightsHiddenOutputFinal, baseModel.BiasOutputFinal,
+              baseModel.GetMathEngine() // E passamos a engine que ele já está usando
+          )
     {
         this.vocabularyManager = vocabManager ?? throw new ArgumentNullException(nameof(vocabManager));
-        this.searchService = new MockSearchService();
+        this.searchService = searchService ?? new MockSearchService();
     }
+    
+    // O construtor antigo que aceitava múltiplos Tensors foi REMOVIDO por ser obsoleto.
 
     public string GenerateResponse(string inputText, int maxLength = 50)
     {
@@ -62,7 +72,6 @@ public class GenerativeNeuralNetworkLSTM : NeuralNetworkLSTM
             return "Erro: Entrada vazia ou nula.";
         }
 
-        // 1. Prepara o estado inicial da rede (priming)
         ResetHiddenState();
         var tokens = Tokenize(inputText);
 
@@ -72,21 +81,20 @@ public class GenerativeNeuralNetworkLSTM : NeuralNetworkLSTM
             Forward(inputTensor); // Aquece a rede com o prompt
         }
 
-        // 2. Inicia a geração de texto
         List<string> responseTokens = new List<string>();
         string lastToken = tokens.LastOrDefault() ?? "<UNK>";
 
         for (int i = 0; i < maxLength; i++)
         {
             var inputTensor = CreateOneHotTensorForToken(lastToken);
-            var output = Forward(inputTensor); // Gera o próximo token
+            // O método Forward agora é acelerado por GPU, esta chamada não precisa mudar.
+            var output = Forward(inputTensor); 
 
             int predictedTokenIndex = SampleToken(output);
             string predictedToken = vocabularyManager.ReverseVocab.ContainsKey(predictedTokenIndex)
                 ? vocabularyManager.ReverseVocab[predictedTokenIndex]
                 : "<UNK>";
 
-            // Critério de parada: se gerar um token de fim de frase ou repetir demais
             if (predictedToken == "." || predictedToken == "!" || predictedToken == "?")
             {
                 responseTokens.Add(predictedToken);
@@ -94,10 +102,9 @@ public class GenerativeNeuralNetworkLSTM : NeuralNetworkLSTM
             }
 
             responseTokens.Add(predictedToken);
-            lastToken = predictedToken; // O próximo input será o token que acabamos de gerar
+            lastToken = predictedToken;
         }
 
-        // 3. Pós-processamento
         string response = string.Join(" ", responseTokens).Trim();
         if (string.IsNullOrEmpty(response))
         {
@@ -107,30 +114,30 @@ public class GenerativeNeuralNetworkLSTM : NeuralNetworkLSTM
         return response.Capitalize();
     }
 
-    // Métodos utilitários refatorados
+    // Métodos utilitários (não precisam de alteração)
     private string[] Tokenize(string text)
     {
+        // Nota: Esta tokenização é simples. A do VocabularyManager com Regex é melhor.
         return text.ToLower().Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
     }
 
     private Tensor CreateOneHotTensorForToken(string token)
     {
-        double[] inputData = new double[InputSize]; // Cria um vetor de zeros
+        double[] inputData = new double[InputSize];
         if (vocabularyManager.Vocab.TryGetValue(token, out int tokenIndex))
         {
             if (tokenIndex < inputData.Length)
-                inputData[tokenIndex] = 1.0; // Define a posição do token como 1
+                inputData[tokenIndex] = 1.0;
         }
         else
         {
             if (vocabularyManager.Vocab.TryGetValue("<UNK>", out int unkIndex) && unkIndex < inputData.Length)
-                inputData[unkIndex] = 1.0; // Fallback para token desconhecido
+                inputData[unkIndex] = 1.0;
         }
 
         return new Tensor(inputData, new int[] { InputSize });
     }
 
-    // O resto da classe (SampleToken, etc.) permanece o mesmo...
     private int SampleToken(Tensor output)
     {
         if (output == null || output.GetData().Length == 0)
@@ -142,17 +149,17 @@ public class GenerativeNeuralNetworkLSTM : NeuralNetworkLSTM
         double total = probs.Sum();
         if (total < 1e-9)
         {
-            Random rand = new Random();
-            return rand.Next(probs.Length);
+            // Fallback para uma escolha aleatória se a soma das probabilidades for zero.
+            return new Random().Next(probs.Length);
         }
 
+        // Normaliza as probabilidades
         for (int i = 0; i < probs.Length; i++)
         {
             probs[i] /= total;
         }
 
-        Random randGen = new Random();
-        double r = randGen.NextDouble();
+        double r = new Random().NextDouble();
         double cumulative = 0;
         for (int i = 0; i < probs.Length; i++)
         {
@@ -163,33 +170,7 @@ public class GenerativeNeuralNetworkLSTM : NeuralNetworkLSTM
             }
         }
 
-        return probs.Length - 1;
-    }
-
-    // ... os outros métodos privados (IsResponseCoherent, etc.) também permanecem
-    private bool IsResponseCoherent(string input, string response)
-    {
-        if (string.IsNullOrEmpty(input) || string.IsNullOrEmpty(response))
-        {
-            return false;
-        }
-
-        var inputTokens = input.Split(' ').ToHashSet();
-        var responseTokens = response.Split(' ');
-        return responseTokens.Any(t => inputTokens.Contains(t));
-    }
-
-    private string AdjustResponse(string input, string response)
-    {
-        var inputTokens = input.Split(' ').Where(t => vocabularyManager.Vocab.ContainsKey(t)).ToList();
-        if (inputTokens.Any())
-        {
-            Random rand = new Random();
-            string relevantToken = inputTokens[rand.Next(inputTokens.Count)];
-            return $"{relevantToken} {response}".Trim();
-        }
-
-        return response;
+        return probs.Length - 1; // Fallback para o último token
     }
 
     internal VocabularyManager VocabularyManager => vocabularyManager;

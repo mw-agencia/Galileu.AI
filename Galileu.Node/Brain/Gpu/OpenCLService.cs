@@ -3,6 +3,7 @@
 using OpenCL.Net;
 using System.Linq;
 using System.Text;
+using Environment = System.Environment;
 
 namespace Galileu.Node.Brain.Gpu;
 
@@ -58,8 +59,7 @@ public class OpenCLService : IDisposable
 
             // 4. Carregar e compilar o programa do kernel
             byte[] kernelBytes =
-                File.ReadAllBytes(
-                    "/home/mplopes/Documentos/GitHub/Galileu.AI/Galileu.Node/Kernels/MatrixOperations.cl");
+                File.ReadAllBytes(Path.Combine(Environment.CurrentDirectory, "Kernels", "MatrixOperations.cl"));
             string kernelSource = new UTF8Encoding(false).GetString(kernelBytes);
 
             program = Cl.CreateProgramWithSource(Context.Value, 1, new[] { kernelSource }, null, out error);

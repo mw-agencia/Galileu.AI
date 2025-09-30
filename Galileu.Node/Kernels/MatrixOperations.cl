@@ -1,4 +1,3 @@
-
 __kernel void matmul_forward(
     __global const double* A,
     __global const double* B,

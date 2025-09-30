@@ -1,7 +1,7 @@
 using Galileu.Node.Core;
-using Galileu.Node.Brain.Gpu; // Adicionado
-using System; // Adicionado
-using System.IO; // Adicionado
+using Galileu.Node.Interfaces;
+using System;
+using System.IO;
 
 namespace Galileu.Node.Brain;
 
@@ -13,77 +13,50 @@ public class ModelSerializerLSTM
         {
             throw new ArgumentNullException(nameof(model));
         }
-
-        try
-        {
-            model.SaveModel(filePath);
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"Erro ao salvar o modelo LSTM: {ex.Message}");
-            throw;
-        }
+        // A lógica de salvar agora está totalmente encapsulada no próprio modelo.
+        model.SaveModel(filePath);
     }
 
-    // CORREÇÃO: O método agora aceita OpenCLService para repassá-lo.
-    public static GenerativeNeuralNetworkLSTM? LoadModel(string filePath, OpenCLService openCLService)
+    // --- CORREÇÃO PRINCIPAL: O método agora aceita IMathEngine, não OpenCLService ---
+    public static GenerativeNeuralNetworkLSTM? LoadModel(string filePath, IMathEngine mathEngine)
     {
         try
         {
-            if (!File.Exists(filePath))
-            {
-                Console.WriteLine($"Arquivo do modelo LSTM não encontrado em: {filePath}");
-                return null;
-            }
-
-            // CORREÇÃO: Passa o openCLService para o método LoadModel da classe base.
-            var baseModel = NeuralNetworkLSTM.LoadModel(filePath, openCLService);
+            // 1. Carrega o modelo base (os pesos) usando a engine de matemática fornecida.
+            // Esta chamada está correta agora.
+            var baseModel = NeuralNetworkLSTM.LoadModel(filePath, mathEngine);
             if (baseModel == null)
             {
-                Console.WriteLine("Falha ao carregar o modelo base LSTM.");
+                // A mensagem de erro já é impressa dentro do NeuralNetworkLSTM.LoadModel.
                 return null;
             }
 
+            // 2. Carrega o vocabulário, que é salvo separadamente.
             var vocabManager = new VocabularyManager();
             int vocabSize = vocabManager.LoadVocabulary();
             if (vocabSize == 0)
             {
-                Console.WriteLine("Vocabulário vazio ou não encontrado em 'vocab.txt'.");
+                Console.WriteLine("Erro: Vocabulário vazio ou não encontrado em 'vocab.txt'.");
                 return null;
             }
 
+            // 3. Valida a consistência entre o modelo carregado e o vocabulário.
             if (vocabSize != baseModel.OutputSize)
             {
                 Console.WriteLine(
-                    $"Tamanho do vocabulário ({vocabSize}) não corresponde ao OutputSize do modelo ({baseModel.OutputSize}).");
+                    $"Erro de Inconsistência: Tamanho do vocabulário ({vocabSize}) não corresponde ao OutputSize do modelo ({baseModel.OutputSize}).");
                 return null;
             }
 
-            // CORREÇÃO: Passa o openCLService para o construtor do GenerativeNeuralNetworkLSTM.
-            return new GenerativeNeuralNetworkLSTM(
-                baseModel.InputSize,
-                baseModel.HiddenSize,
-                baseModel.OutputSize,
-                baseModel.WeightsInputForget,
-                baseModel.WeightsHiddenForget,
-                baseModel.WeightsInputInput,
-                baseModel.WeightsHiddenInput,
-                baseModel.WeightsInputCell,
-                baseModel.WeightsHiddenCell,
-                baseModel.WeightsInputOutput,
-                baseModel.WeightsHiddenOutput,
-                baseModel.BiasForget,
-                baseModel.BiasInput,
-                baseModel.BiasCell,
-                baseModel.BiasOutput,
-                baseModel.WeightsHiddenOutputFinal,
-                baseModel.BiasOutputFinal,
-                vocabManager,
-                openCLService);
+            // --- CORREÇÃO PRINCIPAL: Usa o construtor correto e limpo ---
+            // Em vez de passar 20 parâmetros, passamos o modelo base já construído.
+            // O compilador encontrará este construtor:
+            // GenerativeNeuralNetworkLSTM(NeuralNetworkLSTM, VocabularyManager, ISearchService?)
+            return new GenerativeNeuralNetworkLSTM(baseModel, vocabManager, new MockSearchService());
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Erro ao carregar o modelo LSTM generativo: {ex.Message}");
+            Console.WriteLine($"Erro crítico ao carregar o modelo LSTM generativo: {ex.Message}");
             return null;
         }
     }

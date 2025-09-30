@@ -4,15 +4,18 @@ namespace Galileu.Node.Interfaces;
 
 public interface IMathTensor : IDisposable
 {
+    int[] Shape { get; }
+    int TotalSize { get; }
+    Tensor ToCpuTensor(); // Método para ler os dados de volta para a CPU
 }
 
 public interface IMathEngine : IDisposable
 {
     bool IsGpu { get; }
 
+    IMathTensor CreateTensor(int[] shape);
     IMathTensor CreateTensor(double[] hostData, int[] shape);
-    Tensor ReadTensor(IMathTensor tensor); // Retorna o Tensor da CPU
-
+    
     void MatrixMultiply(IMathTensor a, IMathTensor b, IMathTensor result);
     void Add(IMathTensor a, IMathTensor b, IMathTensor result);
     void AddBroadcast(IMathTensor matrix, IMathTensor vector, IMathTensor result);

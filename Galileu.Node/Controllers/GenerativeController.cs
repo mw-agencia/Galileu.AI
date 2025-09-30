@@ -1,4 +1,4 @@
-// --- START OF FILE GenerativeController.cs ---
+// --- START OF FILE GenerativeController.cs (FINAL CORRECTED VERSION) ---
 
 using Galileu.Node.Core;
 using Galileu.Node.Models;
@@ -12,116 +12,63 @@ namespace Galileu.Node.Controllers;
 public class GenerativeController : ControllerBase
 {
     private readonly GenerativeService _generativeService;
+    public string modelSavePath = "";
 
     public GenerativeController(GenerativeService generativeService)
     {
         _generativeService = generativeService;
+        // --- MUDANÇA: Toda a lógica de inicialização foi REMOVIDA do construtor ---
     }
 
-    [HttpGet]
-    public IActionResult Get()
+    [HttpGet("status")]
+    public IActionResult GetStatus()
     {
-        return Ok("GenerativeController está pronto. Chame o endpoint trainer para iniciar.");
+        if (_generativeService.IsModelLoaded)
+        {
+            return Ok("Serviço generativo pronto e modelo carregado.");
+        }
+        return Ok("Serviço generativo em execução, mas nenhum modelo foi carregado. Use o endpoint /trainer.");
     }
-
-    // O endpoint build-vocabulary foi removido, pois sua lógica agora está no /trainer.
 
     [HttpPost("trainer")]
     public async Task<IActionResult> Trainer([FromForm] Trainer trainer)
     {
-        try
+        if (!System.IO.File.Exists(trainer.datasetPath))
         {
-            if (!System.IO.File.Exists(trainer.datasetPath))
-            {
-                return BadRequest($"Arquivo de dataset não encontrado em: {trainer.datasetPath}");
-            }
-
-            var vocabManager = new VocabularyManager();
-            if (!System.IO.File.Exists(vocabManager.VocabFilePath))
-            {
-                Console.WriteLine(
-                    "[GenerativeController] Vocabulário não encontrado. Criando a partir do dataset fornecido...");
-                vocabManager.BuildVocabulary(trainer.datasetPath);
-            }
-
-            // 2. Carrega o vocabulário para obter seu tamanho.
-            int vocabSize = vocabManager.LoadVocabulary();
-            if (vocabSize == 0)
-            {
-                return StatusCode(500, "Falha ao construir ou carregar o vocabulário. O dataset pode estar vazio.");
-            }
-
-            // 3. Configura o serviço com os parâmetros corretos e dinâmicos.
-            Console.WriteLine(
-                $"[GenerativeController] Vocabulário pronto. Tamanho: {vocabSize} tokens. Configurando o serviço...");
-            int contextWindowSize = 5;
-            int inputSize = vocabSize;
-            int hiddenSize = 128;
-            int outputSize = vocabSize;
-            var modelSavePath = Path.Combine(Environment.CurrentDirectory, "Dayson", "Dayson.json");
-
-            _generativeService.Configure(
-                inputSize,
-                hiddenSize,
-                outputSize,
-                contextWindowSize,
-                modelSavePath,
-                new MockSearchService()
-            );
-
-            // 4. Inicia o treinamento.
-            await _generativeService.TrainModelAsync(trainer);
-            return Ok("Treinamento concluído!");
+            return BadRequest($"Arquivo de dataset não encontrado em: {trainer.datasetPath}");
         }
-        catch (Exception ex)
+
+        // A lógica de vocabulário e configuração é melhor tratada dentro do serviço,
+        // mas por enquanto podemos mantê-la aqui para configurar o serviço antes de treinar.
+        var vocabManager = new VocabularyManager();
+        int vocabSize = vocabManager.BuildVocabulary(trainer.datasetPath);
+        if (vocabSize == 0)
         {
-            return StatusCode(500, $"Um erro inesperado ocorreu durante o treinamento: {ex.Message}");
+            return StatusCode(500, "Falha ao construir ou carregar o vocabulário.");
         }
+
+        // Configura o serviço com os parâmetros corretos antes do treinamento
+        _generativeService.Configure(
+            inputSize: vocabSize,
+            hiddenSize: 256, // Manter consistente
+            outputSize: vocabSize,
+            contextWindowSize: 5,
+            Path.Combine(Environment.CurrentDirectory, "Dayson", "Dayson.json"),
+            searchService: new MockSearchService()
+        );
+        
+        await _generativeService.TrainModelAsync(trainer);
+        return Ok("Treinamento concluído e modelo recarregado para inferência!");
     }
 
     [HttpPost("generate")]
     public async Task<IActionResult> Generate([FromBody] GenerateResponse generateResponse)
     {
-        var vocabManager = new VocabularyManager();
-        if (!System.IO.File.Exists(vocabManager.VocabFilePath))
+        if (!_generativeService.IsModelLoaded)
         {
-            Console.WriteLine(
-                "[GenerativeController] Vocabulário não encontrado...");
+            return BadRequest("O modelo não está carregado. Treine um modelo primeiro usando o endpoint /trainer.");
         }
 
-        // 2. Carrega o vocabulário para obter seu tamanho.
-        int vocabSize = vocabManager.LoadVocabulary();
-        if (vocabSize == 0)
-        {
-            return StatusCode(500, "Falha ao construir ou carregar o vocabulário. O dataset pode estar vazio.");
-        }
-
-        // 3. Configura o serviço com os parâmetros corretos e dinâmicos.
-        Console.WriteLine(
-            $"[GenerativeController] Vocabulário pronto. Tamanho: {vocabSize} tokens. Configurando o serviço...");
-        int contextWindowSize = 5;
-        int inputSize = vocabSize;
-        int hiddenSize = 128;
-        int outputSize = vocabSize;
-        var modelSavePath = Path.Combine(Environment.CurrentDirectory, "Dayson", "Dayson.json");
-
-        _generativeService.Configure(
-            inputSize,
-            hiddenSize,
-            outputSize,
-            contextWindowSize,
-            modelSavePath,
-            new MockSearchService()
-        );
-        
-        if (!_generativeService.IsConfigured)
-        {
-            if (!_generativeService.TryLoadConfigurationFromModel())
-            {
-                return BadRequest("O serviço não está configurado. Treine um modelo primeiro usando o endpoint /trainer.");
-            }
-        }
-        
         var response = await _generativeService.GenerateAsync(generateResponse);
         return Ok(response);
     }

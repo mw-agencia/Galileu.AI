@@ -1,5 +1,3 @@
-// --- START OF FILE TreeSwapFile/BinaryTreeFileStorage.cs (FINAL CORRECTED VERSION) ---
-
 using System;
 using System.IO;
 using System.Text;
@@ -11,6 +9,8 @@ public class BinaryTreeFileStorage : IDisposable
 {
     private readonly string _filePath;
     private readonly FileStream _fileStream;
+    private readonly BinaryWriter _writer;
+    private readonly BinaryReader _reader;
     private readonly ReaderWriterLockSlim _lock = new ReaderWriterLockSlim();
     private bool _disposed = false;
     private static readonly Encoding Utf8NoBom = new UTF8Encoding(false);
@@ -23,75 +23,66 @@ public class BinaryTreeFileStorage : IDisposable
         {
             Directory.CreateDirectory(directory);
         }
-        // Abre o arquivo uma vez e o mantém aberto
-        _fileStream = new FileStream(_filePath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.Read);
+        _fileStream = new FileStream(_filePath, FileMode.Create, FileAccess.ReadWrite, FileShare.None);
+        _writer = new BinaryWriter(_fileStream, Utf8NoBom, true);
+        _reader = new BinaryReader(_fileStream, Utf8NoBom, true);
     }
-
-    // O StoreData agora é para armazenamento sequencial
-    public long StoreData(string data)
+    
+    public long StoreData(byte[] dataBytes)
     {
         _lock.EnterWriteLock();
         try
         {
             if (_disposed) throw new ObjectDisposedException(nameof(BinaryTreeFileStorage));
-
-            byte[] dataBytes = Utf8NoBom.GetBytes(data);
-            if (dataBytes.Length > TreeNode.MaxDataSize)
-            {
-                // Ignora dados que são grandes demais para o bloco
-                Console.WriteLine($"Aviso: Amostra com {dataBytes.Length} bytes excedeu o máximo de {TreeNode.MaxDataSize} e foi ignorada.");
-                return -1;
-            }
-
-            var node = new TreeNode();
-            Array.Copy(dataBytes, node.Data, dataBytes.Length);
-
-            long offset = _fileStream.Length; // O offset é a posição atual do final do arquivo
+            long offset = _fileStream.Length; 
             _fileStream.Seek(offset, SeekOrigin.Begin);
-            
-            byte[] nodeBytes = node.Serialize();
-            _fileStream.Write(nodeBytes, 0, nodeBytes.Length);
-            
+            _writer.Write(dataBytes.Length);
+            _writer.Write(dataBytes);
             return offset;
         }
-        finally
-        {
-            _lock.ExitWriteLock();
-        }
+        catch { return -1; }
+        finally { _lock.ExitWriteLock(); }
     }
 
-    // GetData agora lê um bloco de tamanho fixo em um offset específico
+    public long StoreData(string data)
+    {
+        byte[] dataBytes = Utf8NoBom.GetBytes(data);
+        return StoreData(dataBytes);
+    }
+
+    public void Flush()
+    {
+        _lock.EnterWriteLock();
+        try { _writer?.Flush(); }
+        finally { _lock.ExitWriteLock(); }
+    }
+    
     public string GetData(long offset)
     {
         _lock.EnterReadLock();
         try
         {
             if (_disposed) throw new ObjectDisposedException(nameof(BinaryTreeFileStorage));
-            
-            byte[] nodeBuffer = new byte[TreeNode.NodeSize];
             _fileStream.Seek(offset, SeekOrigin.Begin);
-            int bytesRead = _fileStream.Read(nodeBuffer, 0, TreeNode.NodeSize);
-
-            if (bytesRead != TreeNode.NodeSize)
-                throw new IOException($"Leitura incompleta no offset {offset}.");
-            
-            var node = TreeNode.Deserialize(nodeBuffer);
-            
-            // Converte os dados para string, removendo os bytes nulos do final
-            return Utf8NoBom.GetString(node.Data).TrimEnd('\0');
+            int dataLength = _reader.ReadInt32();
+            byte[] dataBytes = _reader.ReadBytes(dataLength);
+            return Utf8NoBom.GetString(dataBytes);
         }
         finally
         {
             _lock.ExitReadLock();
         }
     }
-
+    
+    // MÉTODO CORRIGIDO (ADICIONADO)
+    // Este método público implementa a interface IDisposable.
     public void Dispose()
     {
         Dispose(true);
         GC.SuppressFinalize(this);
     }
 
+    // Este método protegido contém a lógica de limpeza.
     protected virtual void Dispose(bool disposing)
     {
         if (_disposed) return;
@@ -100,33 +91,25 @@ public class BinaryTreeFileStorage : IDisposable
             _lock.EnterWriteLock();
             try
             {
+                _writer?.Close();
+                _reader?.Close();
                 _fileStream?.Close();
-                _fileStream?.Dispose();
             }
-            finally
-            {
-                _lock.ExitWriteLock();
-            }
+            finally { _lock.ExitWriteLock(); }
             _lock?.Dispose();
-
-            try { if (File.Exists(_filePath)) File.Delete(_filePath); }
-            catch (IOException) { /* Ignora */ }
         }
         _disposed = true;
     }
-
+    
     public void Clear()
     {
         _lock.EnterWriteLock();
         try
         {
             if (_disposed) return;
-            _fileStream.SetLength(0); // Trunca o arquivo para tamanho zero
+            _fileStream.SetLength(0);
             _fileStream.Flush();
         }
-        finally
-        {
-            _lock.ExitWriteLock();
-        }
+        finally { _lock.ExitWriteLock(); }
     }
 }

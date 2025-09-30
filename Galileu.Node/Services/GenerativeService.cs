@@ -2,7 +2,9 @@ using Galileu.Node.Brain;
 using Galileu.Node.Core;
 using Galileu.Node.Interfaces;
 using Galileu.Node.Models;
+using System.IO;          
 using System.Text.Json;
+using System.Threading.Tasks;
 using Galileu.Node.Brain.Gpu;
 
 namespace Galileu.Node.Services;
@@ -16,19 +18,56 @@ public class GenerativeService
     private string _modelPath = Path.Combine(Environment.CurrentDirectory, "Dayson", "Dayson.json");
     private ISearchService _searchService = new MockSearchService();
 
-    // CORREÇÃO: Adicionamos o OpenCLService como uma dependência do serviço.
-    private readonly OpenCLService _openCLService;
+    private readonly IMathEngine _mathEngine;
+    private readonly PrimingService _primingService;
+    
+    private GenerativeNeuralNetworkLSTM? _model;
+    
+    public bool IsModelLoaded => _model != null;
 
-    public bool IsConfigured { get; private set; } = false;
-
-    // CORREÇÃO: Injetamos o OpenCLService através do construtor.
-    public GenerativeService(OpenCLService openCLService)
+    public GenerativeService(OpenCLService openCLService, PrimingService primingService)
     {
-        _openCLService = openCLService;
+        _primingService = primingService;
+        if (openCLService.IsGpuAvailable)
+        {
+            Console.WriteLine("[GenerativeService] Usando GpuMathEngine para aceleração.");
+            _mathEngine = new GpuMathEngine(openCLService);
+        }
+        else
+        {
+            Console.WriteLine("[GenerativeService] GPU não disponível. Usando CpuMathEngine como fallback.");
+            _mathEngine = new CpuMathEngine();
+        }
     }
 
-    public void Configure(int inputSize, int hiddenSize, int outputSize, int contextWindowSize, string modelPath,
-        ISearchService searchService)
+    public void InitializeFromDisk()
+    {
+        Console.WriteLine("[GenerativeService] Tentando inicializar o modelo do disco...");
+        if (!File.Exists(_modelPath))
+        {
+            Console.WriteLine($"[GenerativeService] Nenhum modelo encontrado em '{_modelPath}'. O treinamento é necessário.");
+            return;
+        }
+
+        // --- CORREÇÃO 2: A lógica do antigo 'TryLoadConfigurationFromModel' foi mesclada aqui ---
+        // E a chamada if() redundante foi removida.
+        bool configLoaded = LoadConfigurationFromModelFile();
+        if (configLoaded)
+        {
+            _model = ModelSerializerLSTM.LoadModel(_modelPath, _mathEngine);
+            if (_model != null)
+            {
+                Console.WriteLine("[GenerativeService] Modelo carregado com sucesso.");
+                _primingService.PrimeModel(_model);
+            }
+            else
+            {
+                 Console.WriteLine("[GenerativeService] Falha ao carregar o modelo, embora o arquivo de configuração exista.");
+            }
+        }
+    }
+
+    public void Configure(int inputSize, int hiddenSize, int outputSize, int contextWindowSize, string modelPath, ISearchService searchService)
     {
         _inputSize = inputSize;
         _hiddenSize = hiddenSize;
@@ -36,11 +75,11 @@ public class GenerativeService
         _contextWindowSize = contextWindowSize;
         _modelPath = modelPath;
         _searchService = searchService;
-        IsConfigured = true;
-        Console.WriteLine($"[GenerativeService] Configurado com sucesso. InputSize: {_inputSize}");
+        Console.WriteLine($"[GenerativeService] Configurado. InputSize: {_inputSize}, HiddenSize: {_hiddenSize}");
     }
 
-    public bool TryLoadConfigurationFromModel()
+    // Este método agora é privado e usado apenas pela inicialização.
+    private bool LoadConfigurationFromModelFile()
     {
         if (string.IsNullOrEmpty(_modelPath) || !File.Exists(_modelPath)) return false;
 
@@ -54,19 +93,17 @@ public class GenerativeService
 
             if (modelData != null && vocabSize == modelData.OutputSize)
             {
-                int contextWindowSize = 5; // Assumimos o mesmo valor usado no treinamento
                 Configure(
                     modelData.InputSize,
                     modelData.HiddenSize,
                     modelData.OutputSize,
-                    contextWindowSize,
+                    5, // Assumimos o mesmo valor usado no treinamento
                     _modelPath,
                     new MockSearchService()
                 );
                 Console.WriteLine("[GenerativeService] Configuração carregada a partir de um modelo salvo.");
                 return true;
             }
-
             return false;
         }
         catch (Exception ex)
@@ -78,81 +115,44 @@ public class GenerativeService
 
     public async Task TrainModelAsync(Trainer trainerOptions)
     {
-        if (trainerOptions == null) return;
-
         await Task.Run(() =>
         {
-            // CORREÇÃO: Adicionando um try-catch detalhado para capturar qualquer exceção.
-            try
+            GenerativeNeuralNetworkLSTM? trainingModel;
+
+            if (File.Exists(_modelPath))
             {
-                if (File.Exists(_modelPath))
+                Console.WriteLine("Continuando o treinamento do modelo existente...");
+                trainingModel = ModelSerializerLSTM.LoadModel(_modelPath, _mathEngine);
+                if (trainingModel == null)
                 {
-                    Console.WriteLine("Continuando o treinando o modelo LSTM generativo...");
-                    var modelData = ModelSerializerLSTM.LoadModel(_modelPath, _openCLService);
-
-                    var trainer = new ModelTrainerLSTM(modelData);
-                    trainer.TrainModel(trainerOptions.datasetPath, trainerOptions.learningRate, trainerOptions.epochs,
-                        batchSize: 32, contextWindowSize: _contextWindowSize);
-
-                    ModelSerializerLSTM.SaveModel(trainer.model, _modelPath);
-                    Console.WriteLine($"Modelo salvo com sucesso em: {_modelPath}");
-                }
-                else
-                {
-                    Console.WriteLine("Criando e treinando o modelo LSTM generativo...");
-
-                    var model = new GenerativeNeuralNetworkLSTM(
-                        _inputSize,
-                        _hiddenSize,
-                        _outputSize,
-                        trainerOptions.datasetPath,
-                        _searchService,
-                        _openCLService);
-
-                    var trainer = new ModelTrainerLSTM(model);
-                    trainer.TrainModel(trainerOptions.datasetPath, trainerOptions.learningRate, trainerOptions.epochs,
-                        batchSize: 32, contextWindowSize: _contextWindowSize);
-
-                    model.SaveModel(_modelPath);
-                    Console.WriteLine($"Modelo salvo com sucesso em: {_modelPath}");
+                     Console.WriteLine("Falha ao carregar modelo para treinamento. Criando um novo.");
+                     trainingModel = new GenerativeNeuralNetworkLSTM(_inputSize, _hiddenSize, _outputSize, trainerOptions.datasetPath, _searchService, _mathEngine);
                 }
             }
-            catch (Exception ex)
+            else
             {
-                // Este bloco agora irá capturar e imprimir qualquer erro que ocorra
-                // em ModelTrainerLSTM ou em qualquer lugar dentro deste Task.
-                Console.WriteLine("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
-                Console.WriteLine("!!  UM ERRO CRÍTICO OCORREU DURANTE O TREINAMENTO   !!");
-                Console.WriteLine("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
-                Console.WriteLine($"Tipo de Erro: {ex.GetType().Name}");
-                Console.WriteLine($"Mensagem: {ex.Message}");
-                Console.WriteLine("Stack Trace:");
-                Console.WriteLine(ex.StackTrace);
-                Console.WriteLine("--------------------------------------------------------");
+                Console.WriteLine("Criando e treinando um novo modelo LSTM generativo...");
+                trainingModel = new GenerativeNeuralNetworkLSTM(_inputSize, _hiddenSize, _outputSize, trainerOptions.datasetPath, _searchService, _mathEngine);
             }
+            
+            var trainer = new ModelTrainerLSTM(trainingModel);
+            trainer.TrainModel(trainerOptions.datasetPath, trainerOptions.learningRate, trainerOptions.epochs,
+                batchSize: 32, contextWindowSize: _contextWindowSize, trainerOptions.validationSplit);
+
+            trainingModel.SaveModel(_modelPath);
+            Console.WriteLine($"Modelo salvo com sucesso em: {_modelPath}. Recarregando para inferência.");
+            
+            InitializeFromDisk(); 
         });
     }
 
     public async Task<string?> GenerateAsync(GenerateResponse generateResponse)
     {
-        return await Task.Run(() =>
+        if (_model == null)
         {
-            try
-            {
-                // CORREÇÃO: Passamos o _openCLService para o método LoadModel, que agora espera 2 argumentos.
-                var loadedModel = ModelSerializerLSTM.LoadModel(_modelPath, _openCLService);
-                if (loadedModel == null)
-                {
-                    return "Erro: Modelo não pôde ser carregado.";
-                }
+            return "Erro: O modelo não está carregado. Treine ou reinicie o serviço.";
+        }
 
-                string response = loadedModel.GenerateResponse(generateResponse.input, maxLength: 50);
-                return response;
-            }
-            catch (Exception ex)
-            {
-                return $"Erro interno durante a geração: {ex.Message}";
-            }
-        });
+        return await Task.Run(() => _model.GenerateResponse(generateResponse.input, maxLength: 50));
     }
 }
