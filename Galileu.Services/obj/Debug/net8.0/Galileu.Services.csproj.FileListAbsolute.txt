@@ -1,0 +1,16 @@
+/home/mplopes/Documentos/GitHub/Galileu.AI/Galileu.Services/bin/Debug/net8.0/Galileu.Services.deps.json
+/home/mplopes/Documentos/GitHub/Galileu.AI/Galileu.Services/bin/Debug/net8.0/Galileu.Services.dll
+/home/mplopes/Documentos/GitHub/Galileu.AI/Galileu.Services/bin/Debug/net8.0/Galileu.Services.pdb
+/home/mplopes/Documentos/GitHub/Galileu.AI/Galileu.Services/bin/Debug/net8.0/Galileu.Models.dll
+/home/mplopes/Documentos/GitHub/Galileu.AI/Galileu.Services/bin/Debug/net8.0/Galileu.Models.pdb
+/home/mplopes/Documentos/GitHub/Galileu.AI/Galileu.Services/obj/Debug/net8.0/Galileu.Services.csproj.AssemblyReference.cache
+/home/mplopes/Documentos/GitHub/Galileu.AI/Galileu.Services/obj/Debug/net8.0/Galileu.Services.GeneratedMSBuildEditorConfig.editorconfig
+/home/mplopes/Documentos/GitHub/Galileu.AI/Galileu.Services/obj/Debug/net8.0/Galileu.Services.AssemblyInfoInputs.cache
+/home/mplopes/Documentos/GitHub/Galileu.AI/Galileu.Services/obj/Debug/net8.0/Galileu.Services.AssemblyInfo.cs
+/home/mplopes/Documentos/GitHub/Galileu.AI/Galileu.Services/obj/Debug/net8.0/Galileu.Services.csproj.CoreCompileInputs.cache
+/home/mplopes/Documentos/GitHub/Galileu.AI/Galileu.Services/obj/Debug/net8.0/Galileu.Services.sourcelink.json
+/home/mplopes/Documentos/GitHub/Galileu.AI/Galileu.Services/obj/Debug/net8.0/Galileu..280D685C.Up2Date
+/home/mplopes/Documentos/GitHub/Galileu.AI/Galileu.Services/obj/Debug/net8.0/Galileu.Services.dll
+/home/mplopes/Documentos/GitHub/Galileu.AI/Galileu.Services/obj/Debug/net8.0/refint/Galileu.Services.dll
+/home/mplopes/Documentos/GitHub/Galileu.AI/Galileu.Services/obj/Debug/net8.0/Galileu.Services.pdb
+/home/mplopes/Documentos/GitHub/Galileu.AI/Galileu.Services/obj/Debug/net8.0/ref/Galileu.Services.dll
