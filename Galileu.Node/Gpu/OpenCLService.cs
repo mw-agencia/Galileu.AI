@@ -5,7 +5,7 @@ using System.Linq;
 using System.Text;
 using Environment = System.Environment;
 
-namespace Galileu.Node.Brain.Gpu;
+namespace Galileu.Node.Gpu;
 
 public class OpenCLService : IDisposable
 {

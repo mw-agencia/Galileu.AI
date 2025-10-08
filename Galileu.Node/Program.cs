@@ -6,7 +6,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using System.Net.Http.Json;
 using System.Net.Sockets;
-using Galileu.Node.Brain.Gpu;
+using Galileu.Node.Gpu;
 using Galileu.Node.Services;
 using Microsoft.AspNetCore.Http;
 using Services;
@@ -113,41 +113,64 @@ async Task BootstrapNodeAsync(IServiceProvider services, string[] args)
     }
     catch (Exception ex)
     {
-        Console.WriteLine(
-            $"ERRO CRÍTICO no registro: {ex.Message}. O nó não pode se juntar à rede e permanecerá em modo de espera.");
+        Console.WriteLine($"ERRO CRÍTICO no registro: {ex.Message}. O nó não pode se juntar à rede e permanecerá em modo de espera.");
     }
+    
     var _generativeService = services.GetRequiredService<GenerativeService>();
     string modelPath = Path.Combine(Environment.CurrentDirectory, "Dayson", "Dayson.json");
     var datasetPath = Path.Combine(Environment.CurrentDirectory, "Dayson", "pt_0.txt");
+    
     if (!File.Exists(modelPath))
     {
-        if (!System.IO.File.Exists(datasetPath))
+        if (!File.Exists(datasetPath))
         {
             Console.WriteLine($"Arquivo de dataset não encontrado em: {datasetPath}");
             return;
         }
 
-        // A lógica de vocabulário e configuração é melhor tratada dentro do serviço,
-        // mas por enquanto podemos mantê-la aqui para configurar o serviço antes de treinar.
+        Console.WriteLine("\n========================================");
+        Console.WriteLine("CONFIGURAÇÃO DE TREINAMENTO OTIMIZADA");
+        Console.WriteLine("========================================");
+
         var vocabManager = new VocabularyManager();
-        int vocabSize = vocabManager.BuildVocabulary(datasetPath);
+        
+        // ===== VOCABULÁRIO OTIMIZADO =====
+        // Reduzido para 10.000 tokens (em vez de 50.000+)
+        // Isso reduz o tamanho da camada de saída em 80%
+        int vocabSize = vocabManager.BuildVocabulary(datasetPath, maxVocabSize: 20000);
         if (vocabSize == 0)
         {
             Console.WriteLine("Falha ao construir ou carregar o vocabulário.");
             return;
         }
-
-        // Configura o serviço com os parâmetros corretos antes do treinamento
-        _generativeService.Configure(
-            inputSize: vocabSize,
-            hiddenSize: 256, // Manter consistente
-            outputSize: vocabSize,
-            contextWindowSize: 5,
-            Path.Combine(Environment.CurrentDirectory, "Dayson", "Dayson.json"),
-            searchService: new MockSearchService()
+        var trainer = new Trainer(
+            datasetPath, 
+            epochs: 50,           // Reduzido de 100 para 30
+            learningRate: 0.0001,  // Aumentado de 0.0001 para 0.001 (convergência mais rápida)
+            validationSplit: 0.2,
+            batchSize: 32
         );
-        var trainer = new Trainer(datasetPath, 100, 0.001, 0.2);
+        Console.WriteLine($"\n[Config] Vocabulário: {vocabSize} tokens");
+        Console.WriteLine($"[Config] Hidden Size: 256");
+        Console.WriteLine($"[Config] Context Window: 3 timesteps");
+        Console.WriteLine($"[Config] Épocas: {trainer.epochs}");
+        Console.WriteLine($"[Config] Learning Rate: {trainer.learningRate}");
+        Console.WriteLine($"[Config] Batch Size: {trainer.batchSize}");
+        Console.WriteLine($"[Config] Validação: {trainer.validationSplit *100}%\n");
+
+        Console.WriteLine("========================================");
+        Console.WriteLine("INICIANDO TREINAMENTO");
+        Console.WriteLine("Tempo estimado: 8-16 horas (CPU)");
+        Console.WriteLine("========================================\n");
+
         await _generativeService.TrainModelAsync(trainer);
-        Console.WriteLine("Treinamento concluído e modelo recarregado para inferência!");
+        Console.WriteLine("\n========================================");
+        Console.WriteLine("TREINAMENTO CONCLUÍDO!");
+        Console.WriteLine("========================================");
+    }
+    else
+    {
+        Console.WriteLine($"[Bootstrap] Modelo encontrado em {modelPath}. Pulando treinamento.");
+        _generativeService.InitializeFromDisk();
     }
 }

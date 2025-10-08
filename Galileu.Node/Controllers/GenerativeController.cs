@@ -1,6 +1,3 @@
-// --- START OF FILE GenerativeController.cs (FINAL CORRECTED VERSION) ---
-
-using Galileu.Node.Core;
 using Galileu.Node.Models;
 using Galileu.Node.Services;
 using Microsoft.AspNetCore.Mvc;
@@ -12,12 +9,11 @@ namespace Galileu.Node.Controllers;
 public class GenerativeController : ControllerBase
 {
     private readonly GenerativeService _generativeService;
-    public string modelSavePath = "";
 
+    // O construtor agora apenas recebe a injeção de dependência.
     public GenerativeController(GenerativeService generativeService)
     {
         _generativeService = generativeService;
-        // --- MUDANÇA: Toda a lógica de inicialização foi REMOVIDA do construtor ---
     }
 
     [HttpGet("status")]
@@ -31,34 +27,24 @@ public class GenerativeController : ControllerBase
     }
 
     [HttpPost("trainer")]
-    public async Task<IActionResult> Trainer([FromForm] Trainer trainer)
+    // É mais comum usar [FromBody] para objetos complexos, a menos que esteja fazendo upload de arquivo.
+    public async Task<IActionResult> Trainer([FromBody] Trainer trainerOptions)
     {
-        if (!System.IO.File.Exists(trainer.datasetPath))
+        try
         {
-            return BadRequest($"Arquivo de dataset não encontrado em: {trainer.datasetPath}");
+            // A validação e toda a lógica agora estão encapsuladas no serviço.
+            await _generativeService.TrainModelAsync(trainerOptions);
+            return Ok("O treinamento do modelo foi iniciado. Acompanhe o status no console.");
         }
-
-        // A lógica de vocabulário e configuração é melhor tratada dentro do serviço,
-        // mas por enquanto podemos mantê-la aqui para configurar o serviço antes de treinar.
-        var vocabManager = new VocabularyManager();
-        int vocabSize = vocabManager.BuildVocabulary(trainer.datasetPath);
-        if (vocabSize == 0)
+        catch (FileNotFoundException ex)
         {
-            return StatusCode(500, "Falha ao construir ou carregar o vocabulário.");
+            return BadRequest(new { message = ex.Message });
         }
-
-        // Configura o serviço com os parâmetros corretos antes do treinamento
-        _generativeService.Configure(
-            inputSize: vocabSize,
-            hiddenSize: 256, // Manter consistente
-            outputSize: vocabSize,
-            contextWindowSize: 5,
-            Path.Combine(Environment.CurrentDirectory, "Dayson", "Dayson.json"),
-            searchService: new MockSearchService()
-        );
-        
-        await _generativeService.TrainModelAsync(trainer);
-        return Ok("Treinamento concluído e modelo recarregado para inferência!");
+        catch (Exception ex)
+        {
+            // Captura outras exceções que podem ocorrer durante a configuração do treinamento.
+            return StatusCode(500, new { message = $"Um erro ocorreu: {ex.Message}" });
+        }
     }
 
     [HttpPost("generate")]
@@ -70,6 +56,6 @@ public class GenerativeController : ControllerBase
         }
 
         var response = await _generativeService.GenerateAsync(generateResponse);
-        return Ok(response);
+        return Ok(new { response });
     }
 }

@@ -65,3 +65,7 @@
 /home/mplopes/Documentos/GitHub/Galileu.AI/Galileu.Node/bin/Debug/net8.0/Serilog.Sinks.File.dll
 /home/mplopes/Documentos/GitHub/Galileu.AI/Galileu.Node/bin/Debug/net8.0/Akka.Logger.Serilog.dll
 /home/mplopes/Documentos/GitHub/Galileu.AI/Galileu.Node/bin/Debug/net8.0/OpenCL.Net.dll
+/home/mplopes/Documentos/GitHub/Galileu.AI/Galileu.Node/bin/Debug/net8.0/ExtraConstraints.dll
+/home/mplopes/Documentos/GitHub/Galileu.AI/Galileu.Node/bin/Debug/net8.0/Microsoft.Build.Framework.dll
+/home/mplopes/Documentos/GitHub/Galileu.AI/Galileu.Node/bin/Debug/net8.0/OpenCL.NetCore.dll
+/home/mplopes/Documentos/GitHub/Galileu.AI/Galileu.Node/bin/Debug/net8.0/System.CodeDom.dll

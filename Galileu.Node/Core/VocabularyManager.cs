@@ -18,87 +18,149 @@ public class VocabularyManager
     public Dictionary<int, string> ReverseVocab => reverseVocab;
     public int VocabSize => vocab.Count;
 
-    public int BuildVocabulary(string datasetPath)
+    public int BuildVocabulary(string datasetPath, int maxVocabSize = 20000)
     {
-        var tokens = new HashSet<string>();
-
-        if (File.Exists(VocabFilePath))
+        if (!File.Exists(datasetPath))
         {
-            foreach (var line in File.ReadAllLines(VocabFilePath))
-            {
-                if (!string.IsNullOrEmpty(line.Trim())) tokens.Add(line.Trim());
-            }
+            Console.WriteLine($"[VocabularyManager] ERRO: Arquivo de dataset não encontrado: {datasetPath}");
+            return 0;
         }
 
-        // --- CORREÇÃO: Tokenização Aprimorada com Regex ---
-        // Este padrão é a chave da solução. Ele captura:
-        // 1. (\p{L}+) - Sequências de uma ou mais letras (palavras).
-        // 2. (\p{N}+) - Sequências de um ou mais números.
-        // 3. ([.,!?;:'"/\-]) - Qualquer um dos caracteres especiais listados, individualmente.
+        Console.WriteLine($"[VocabularyManager] Construindo vocabulário (máx: {maxVocabSize} tokens)...");
+        
+        string text = File.ReadAllText(datasetPath);
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            Console.WriteLine("[VocabularyManager] ERRO: Dataset vazio.");
+            return 0;
+        }
+
+        // FASE 1: Tokenização e contagem de frequências
+        var tokenFrequency = new Dictionary<string, int>();
         string pattern = @"(\p{L}+|\p{N}+|[.,!?;:'""/\-])";
+        var matches = Regex.Matches(text.ToLower(), pattern);
 
-        if (File.Exists(datasetPath))
+        Console.Write("[VocabularyManager] Analisando tokens...");
+        int processedTokens = 0;
+        
+        foreach (Match match in matches)
         {
-            var datasetText = File.ReadAllText(datasetPath);
-            var matches = Regex.Matches(datasetText.ToLower(), pattern);
-            foreach (Match match in matches)
+            string token = match.Value;
+            
+            if (tokenFrequency.ContainsKey(token))
+                tokenFrequency[token]++;
+            else
+                tokenFrequency[token] = 1;
+
+            processedTokens++;
+            if (processedTokens % 100000 == 0)
             {
-                tokens.Add(match.Value);
+                Console.Write($"\r[VocabularyManager] Analisando tokens: {processedTokens:N0}");
             }
         }
 
-        // Adiciona tokens especiais se não existirem
-        tokens.Add("<PAD>"); // Padding
-        tokens.Add("<UNK>"); // Unknown token
+        Console.WriteLine($"\r[VocabularyManager] Total de tokens processados: {processedTokens:N0}");
+        Console.WriteLine($"[VocabularyManager] Tokens únicos encontrados: {tokenFrequency.Count:N0}");
 
-        vocab.Clear();
-        reverseVocab.Clear();
+        // FASE 2: Seleção dos tokens mais frequentes
+        Vocab.Clear();
+        ReverseVocab.Clear();
 
-        // Garante que o diretório exista antes de escrever o arquivo
-        var directory = Path.GetDirectoryName(VocabFilePath);
-        if (directory != null && !Directory.Exists(directory))
+        // Tokens especiais sempre presentes
+        Vocab["<PAD>"] = 0;
+        Vocab["<UNK>"] = 1;
+        ReverseVocab[0] = "<PAD>";
+        ReverseVocab[1] = "<UNK>";
+
+        // Ordena por frequência decrescente e seleciona os top N
+        var topTokens = tokenFrequency
+            .OrderByDescending(kvp => kvp.Value)
+            .Take(maxVocabSize - 2) // -2 para reservar espaço de <PAD> e <UNK>
+            .ToList();
+
+        int index = 2;
+        int minFrequency = topTokens.Last().Value; // Frequência do token menos comum selecionado
+
+        foreach (var kvp in topTokens)
         {
-            Directory.CreateDirectory(directory);
+            Vocab[kvp.Key] = index;
+            ReverseVocab[index] = kvp.Key;
+            index++;
         }
 
-        using (var writer = new StreamWriter(VocabFilePath, false))
+        Console.WriteLine($"[VocabularyManager] Vocabulário construído:");
+        Console.WriteLine($"  - Tamanho final: {Vocab.Count:N0} tokens");
+        Console.WriteLine($"  - Tokens descartados: {tokenFrequency.Count - topTokens.Count:N0}");
+        Console.WriteLine($"  - Frequência mínima incluída: {minFrequency:N0}");
+        
+        if (topTokens.Count > 0)
         {
-            int index = 0;
-            // Ordena os tokens para garantir um vocabulário consistente entre execuções
-            foreach (var token in tokens.OrderBy(t => t))
+            var mostCommon = topTokens.First();
+            Console.WriteLine($"  - Token mais frequente: '{mostCommon.Key}' ({mostCommon.Value:N0}x)");
+        }
+
+        // FASE 3: Salva vocabulário em disco
+        SaveVocabulary();
+
+        return Vocab.Count;
+    }
+    /// <summary>
+    /// Salva o vocabulário atual em arquivo de texto.
+    /// </summary>
+    public void SaveVocabulary()
+    {
+        try
+        {
+            var directory = Path.GetDirectoryName(VocabFilePath);
+            if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
             {
-                writer.WriteLine(token);
-                vocab[token] = index;
-                reverseVocab[index] = token;
-                index++;
+                Directory.CreateDirectory(directory);
             }
-        }
 
-        return tokens.Count;
+            var sortedVocab = Vocab.OrderBy(kvp => kvp.Value);
+            var lines = sortedVocab.Select(kvp => $"{kvp.Key}\t{kvp.Value}");
+            File.WriteAllLines(VocabFilePath, lines);
+            
+            Console.WriteLine($"[VocabularyManager] Vocabulário salvo em: {VocabFilePath}");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[VocabularyManager] ERRO ao salvar vocabulário: {ex.Message}");
+        }
     }
 
     public int LoadVocabulary()
     {
-        vocab.Clear();
-        reverseVocab.Clear();
-
         if (!File.Exists(VocabFilePath))
         {
+            Console.WriteLine($"[VocabularyManager] Arquivo de vocabulário não encontrado: {VocabFilePath}");
             return 0;
         }
 
-        int index = 0;
-        foreach (var line in File.ReadAllLines(VocabFilePath))
+        try
         {
-            string token = line.Trim();
-            if (!string.IsNullOrEmpty(token))
-            {
-                vocab[token] = index;
-                reverseVocab[index] = token;
-                index++;
-            }
-        }
+            Vocab.Clear();
+            ReverseVocab.Clear();
 
-        return vocab.Count;
+            var lines = File.ReadAllLines(VocabFilePath);
+            foreach (var line in lines)
+            {
+                var parts = line.Split('\t');
+                if (parts.Length == 2 && int.TryParse(parts[1], out int index))
+                {
+                    string token = parts[0];
+                    Vocab[token] = index;
+                    ReverseVocab[index] = token;
+                }
+            }
+
+            Console.WriteLine($"[VocabularyManager] Vocabulário carregado: {Vocab.Count} tokens");
+            return Vocab.Count;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[VocabularyManager] ERRO ao carregar vocabulário: {ex.Message}");
+            return 0;
+        }
     }
 }
