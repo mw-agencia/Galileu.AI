@@ -1,5 +1,3 @@
-// --- ARQUIVO CORRIGIDO: HybridLstmCacheManager.cs ---
-
 using Galileu.Node.Core;
 using Galileu.Node.Interfaces;
 using System;
@@ -10,10 +8,14 @@ using System.Linq;
 
 namespace Galileu.Node.Brain;
 
+/// <summary>
+/// Cache híbrido RAM+Disco para timesteps LSTM.
+/// OTIMIZADO: Limpeza automática de metadados para treinamentos longos.
+/// </summary>
 public class HybridLstmCacheManager : IDisposable
 {
     private const int RAM_CACHE_CAPACITY = 16;
-    private const long DISK_CACHE_SIZE = 10L * 1024 * 1024 * 1024;
+    private const long DISK_CACHE_SIZE = 10L * 1024 * 1024 * 1024; // 10GB
 
     private readonly IMathEngine _mathEngine;
     private readonly MemoryMappedFile _mmf;
@@ -21,16 +23,17 @@ public class HybridLstmCacheManager : IDisposable
     private long _currentDiskPosition = 0;
     private readonly string _tempFilePath;
 
-    // CORREÇÃO: O cache de RAM agora usa uma classe interna privada para evitar confusão de tipos.
+    // Cache de RAM (LRU)
     private readonly Dictionary<int, RamCacheItem> _ramCache;
-    private readonly List<Dictionary<string, long>> _diskOffsets;
     private readonly LinkedList<int> _lruTracker;
+    
+    // === OTIMIZAÇÃO: Metadados com limpeza automática ===
+    private readonly Dictionary<int, Dictionary<string, long>> _diskOffsets;
+    private int _maxTimestepCached = 0;
+    
     private readonly Dictionary<string, int[]> _tensorShapes;
     private bool _disposed = false;
 
-    /// <summary>
-    /// Classe interna privada para armazenar a representação de CPU (Tensor) dos dados no cache de RAM.
-    /// </summary>
     private class RamCacheItem
     {
         public Tensor? Input { get; set; }
@@ -48,25 +51,29 @@ public class HybridLstmCacheManager : IDisposable
     public HybridLstmCacheManager(IMathEngine mathEngine, int embeddingSize, int hiddenSize, int totalTimesteps)
     {
         _mathEngine = mathEngine;
-        _tempFilePath = Path.Combine(Environment.CurrentDirectory, "Dayson", $"lstm_hybrid_cache.bin");
+        _tempFilePath = Path.Combine(Environment.CurrentDirectory, "Dayson", $"lstm_hybrid_cache_{Guid.NewGuid()}.bin");
         _mmf = MemoryMappedFile.CreateFromFile(_tempFilePath, FileMode.Create, null, DISK_CACHE_SIZE, MemoryMappedFileAccess.ReadWrite);
         _accessor = _mmf.CreateViewAccessor();
 
         _ramCache = new Dictionary<int, RamCacheItem>();
-        _diskOffsets = Enumerable.Repeat<Dictionary<string, long>>(null!, totalTimesteps).ToList();
+        _diskOffsets = new Dictionary<int, Dictionary<string, long>>();
         _lruTracker = new LinkedList<int>();
 
         _tensorShapes = new Dictionary<string, int[]>
         {
-            { "Input", new[] { 1, embeddingSize } }, { "HiddenPrev", new[] { 1, hiddenSize } },
-            { "CellPrev", new[] { 1, hiddenSize } }, { "ForgetGate", new[] { 1, hiddenSize } },
-            { "InputGate", new[] { 1, hiddenSize } }, { "CellCandidate", new[] { 1, hiddenSize } },
-            { "OutputGate", new[] { 1, hiddenSize } }, { "CellNext", new[] { 1, hiddenSize } },
-            { "TanhCellNext", new[] { 1, hiddenSize } }, { "HiddenNext", new[] { 1, hiddenSize } }
+            { "Input", new[] { 1, embeddingSize } }, 
+            { "HiddenPrev", new[] { 1, hiddenSize } },
+            { "CellPrev", new[] { 1, hiddenSize } }, 
+            { "ForgetGate", new[] { 1, hiddenSize } },
+            { "InputGate", new[] { 1, hiddenSize } }, 
+            { "CellCandidate", new[] { 1, hiddenSize } },
+            { "OutputGate", new[] { 1, hiddenSize } }, 
+            { "CellNext", new[] { 1, hiddenSize } },
+            { "TanhCellNext", new[] { 1, hiddenSize } }, 
+            { "HiddenNext", new[] { 1, hiddenSize } }
         };
     }
 
-    // O método ainda aceita o LstmStepCache de trabalho (com IMathTensors).
     public void CacheStep(LstmStepCache gpuStepCache, int timeStep)
     {
         if (_ramCache.Count >= RAM_CACHE_CAPACITY)
@@ -74,7 +81,7 @@ public class HybridLstmCacheManager : IDisposable
             EvictLruItemToDisk();
         }
 
-        // CORREÇÃO: Converte o LstmStepCache (IMathTensor) para um RamCacheItem (Tensor) para armazenamento.
+        // Converte para CPU tensors
         var ramItem = new RamCacheItem
         {
             Input = gpuStepCache.Input!.ToCpuTensor(),
@@ -92,6 +99,10 @@ public class HybridLstmCacheManager : IDisposable
         _ramCache[timeStep] = ramItem;
         _lruTracker.AddFirst(timeStep);
         _diskOffsets[timeStep] = new Dictionary<string, long>();
+        
+        // === NOVO: Rastreia timestep máximo ===
+        if (timeStep > _maxTimestepCached)
+            _maxTimestepCached = timeStep;
     }
 
     public IMathTensor RetrieveTensor(int timeStep, string tensorName)
@@ -104,11 +115,16 @@ public class HybridLstmCacheManager : IDisposable
             
             Tensor? cpuTensor = tensorName switch
             {
-                "Input" => ramItem.Input, "HiddenPrev" => ramItem.HiddenPrev,
-                "CellPrev" => ramItem.CellPrev, "ForgetGate" => ramItem.ForgetGate,
-                "InputGate" => ramItem.InputGate, "CellCandidate" => ramItem.CellCandidate,
-                "OutputGate" => ramItem.OutputGate, "CellNext" => ramItem.CellNext,
-                "TanhCellNext" => ramItem.TanhCellNext, "HiddenNext" => ramItem.HiddenNext,
+                "Input" => ramItem.Input, 
+                "HiddenPrev" => ramItem.HiddenPrev,
+                "CellPrev" => ramItem.CellPrev, 
+                "ForgetGate" => ramItem.ForgetGate,
+                "InputGate" => ramItem.InputGate, 
+                "CellCandidate" => ramItem.CellCandidate,
+                "OutputGate" => ramItem.OutputGate, 
+                "CellNext" => ramItem.CellNext,
+                "TanhCellNext" => ramItem.TanhCellNext, 
+                "HiddenNext" => ramItem.HiddenNext,
                 _ => throw new ArgumentException($"Nome do tensor inválido: {tensorName}")
             };
             return _mathEngine.CreateTensor(cpuTensor!.GetData(), cpuTensor.GetShape());
@@ -116,6 +132,9 @@ public class HybridLstmCacheManager : IDisposable
         else
         {
             // Cache Miss (Disco)
+            if (!_diskOffsets.ContainsKey(timeStep))
+                throw new KeyNotFoundException($"Timestep {timeStep} não encontrado no cache");
+                
             long offset = _diskOffsets[timeStep][tensorName];
             var shape = _tensorShapes[tensorName];
             
@@ -161,11 +180,36 @@ public class HybridLstmCacheManager : IDisposable
         return startOffset;
     }
 
+    /// <summary>
+    /// NOVO: Limpa cache completamente (chamado entre batches/épocas).
+    /// CRÍTICO para treinamentos longos.
+    /// </summary>
     public void Reset()
     {
         _ramCache.Clear();
         _lruTracker.Clear();
+        
+        // === OTIMIZAÇÃO: Limpa metadados antigos ===
+        _diskOffsets.Clear();
+        
         _currentDiskPosition = 0;
+        _maxTimestepCached = 0;
+        
+        // Força coleta de lixo após reset
+        GC.Collect(1, GCCollectionMode.Optimized, false);
+    }
+
+    /// <summary>
+    /// NOVO: Imprime estatísticas de uso do cache.
+    /// </summary>
+    public void PrintStats()
+    {
+        long ramUsageMB = _ramCache.Count * 10 * 256 * sizeof(double) / (1024 * 1024); // Aproximado
+        long diskUsageMB = _currentDiskPosition / (1024 * 1024);
+        
+        Console.WriteLine($"[HybridCache] RAM: {_ramCache.Count} timesteps (~{ramUsageMB}MB)");
+        Console.WriteLine($"[HybridCache] Disco: {_diskOffsets.Count} timesteps (~{diskUsageMB}MB)");
+        Console.WriteLine($"[HybridCache] Max timestep: {_maxTimestepCached}");
     }
 
     public void Dispose()

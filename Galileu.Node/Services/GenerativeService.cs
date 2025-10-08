@@ -42,28 +42,79 @@ public class GenerativeService
 
         await Task.Run(() =>
         {
-            // --- CORREÇÃO: Parâmetros para o modelo com Embedding ---
+            // === CONFIGURAÇÃO OTIMIZADA PARA 20 DIAS ===
             const int VOCAB_SIZE = 20000;
-            const int EMBEDDING_SIZE = 128; // Dimensão do vetor de embedding
-            const int HIDDEN_SIZE = 256;
-            const int CONTEXT_WINDOW = 1; // Simplificado para prever a próxima palavra a partir da anterior
+            const int EMBEDDING_SIZE = 128;  // Mantido para qualidade
+            const int HIDDEN_SIZE = 256;     // Mantido para capacidade
+            const int CONTEXT_WINDOW = 1;    // Simplificado para economizar memória
 
-            Console.WriteLine($"[GenerativeService] Configurado. Vocab: {VOCAB_SIZE}, Embedding: {EMBEDDING_SIZE}, Hidden: {HIDDEN_SIZE}");
+            Console.WriteLine($"[GenerativeService] Arquitetura: Vocab={VOCAB_SIZE}, Emb={EMBEDDING_SIZE}, Hidden={HIDDEN_SIZE}");
             
-            var trainingModel = new GenerativeNeuralNetworkLSTM(VOCAB_SIZE, EMBEDDING_SIZE, HIDDEN_SIZE, trainerOptions.datasetPath, _searchService, _mathEngine);
+            var trainingModel = new GenerativeNeuralNetworkLSTM(
+                VOCAB_SIZE, 
+                EMBEDDING_SIZE, 
+                HIDDEN_SIZE, 
+                trainerOptions.datasetPath, 
+                _searchService, 
+                _mathEngine
+            );
+            
+            // === CALCULA MEMÓRIA ESTIMADA DO MODELO ===
+            long modelMemoryMB = CalculateModelMemoryMB(VOCAB_SIZE, EMBEDDING_SIZE, HIDDEN_SIZE);
+            Console.WriteLine($"[GenerativeService] Memória estimada do modelo: ~{modelMemoryMB}MB");
+            Console.WriteLine($"[GenerativeService] Memória disponível para cache/pool: ~{10000 - modelMemoryMB - 2000}MB");
             
             var trainer = new ModelTrainerLSTM(trainingModel);
-            trainer.TrainModel(trainerOptions.datasetPath, trainerOptions.learningRate, trainerOptions.epochs,
-                batchSize: trainerOptions.batchSize, // Podemos aumentar o batch size agora que é mais eficiente
+            
+            Console.WriteLine("\n[GenerativeService] Iniciando treinamento com otimizações de memória...");
+            
+            trainer.TrainModel(
+                trainerOptions.datasetPath, 
+                trainerOptions.learningRate, 
+                trainerOptions.epochs,
+                batchSize: trainerOptions.batchSize,
                 contextWindowSize: CONTEXT_WINDOW, 
-                trainerOptions.validationSplit);
+                trainerOptions.validationSplit
+            );
 
-            // trainingModel.SaveModel(_modelPath); // O Save/Load precisa ser reescrito para o novo formato
-            Console.WriteLine($"Modelo treinado. A funcionalidade de salvar foi desabilitada temporariamente.");
+            // === SALVA MODELO FINAL ===
+            Console.WriteLine($"\n[GenerativeService] Salvando modelo final em {_modelPath}...");
+            trainingModel.SaveModel(_modelPath);
+            Console.WriteLine($"[GenerativeService] Modelo salvo com sucesso!");
             
             _model = trainingModel;
-            // _primingService.PrimeModel(_model); // Priming também precisa ser adaptado
+            
+            // === LIMPEZA PÓS-TREINAMENTO ===
+            Console.WriteLine("[GenerativeService] Executando limpeza pós-treinamento...");
+            GC.Collect(2, GCCollectionMode.Forced, true, true);
+            GC.WaitForPendingFinalizers();
         });
+    }
+
+    /// <summary>
+    /// NOVO: Calcula memória aproximada do modelo em MB.
+    /// </summary>
+    private long CalculateModelMemoryMB(int vocabSize, int embeddingSize, int hiddenSize)
+    {
+        long totalParams = 0;
+        
+        // Embedding layer
+        totalParams += vocabSize * embeddingSize;
+        
+        // LSTM weights (4 gates × input + hidden)
+        totalParams += 4 * (embeddingSize * hiddenSize);  // Input weights
+        totalParams += 4 * (hiddenSize * hiddenSize);     // Hidden weights
+        totalParams += 4 * hiddenSize;                     // Biases
+        
+        // Output layer
+        totalParams += hiddenSize * vocabSize;
+        totalParams += vocabSize;
+        
+        // Cada parâmetro: 8 bytes (double) + Adam state (2× double) = 24 bytes
+        long bytesPerParam = 24;
+        long totalBytes = totalParams * bytesPerParam;
+        
+        return totalBytes / (1024 * 1024);
     }
 
     public async Task<string?> GenerateAsync(GenerateResponse generateResponse)
@@ -74,6 +125,29 @@ public class GenerativeService
 
     public void InitializeFromDisk()
     {
-         Console.WriteLine($"[GenerativeService] Carregamento do disco desabilitado. O treinamento é necessário.");
+        if (!File.Exists(_modelPath))
+        {
+            Console.WriteLine($"[GenerativeService] Modelo não encontrado em {_modelPath}");
+            return;
+        }
+        
+        try
+        {
+            Console.WriteLine($"[GenerativeService] Carregando modelo de {_modelPath}...");
+            _model = ModelSerializerLSTM.LoadModel(_modelPath, _mathEngine);
+            
+            if (_model != null)
+            {
+                Console.WriteLine("[GenerativeService] Modelo carregado com sucesso!");
+            }
+            else
+            {
+                Console.WriteLine("[GenerativeService] Falha ao carregar modelo.");
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[GenerativeService] Erro ao carregar modelo: {ex.Message}");
+        }
     }
 }

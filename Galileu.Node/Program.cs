@@ -11,6 +11,7 @@ using Galileu.Node.Services;
 using Microsoft.AspNetCore.Http;
 using Services;
 using System.Globalization;
+using Galileu.Node.Brain;
 using Galileu.Node.Core;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -41,6 +42,7 @@ builder.Services.AddSingleton<GenerativeService>();
 builder.Services.AddSingleton<WalletService>();
 builder.Services.AddSingleton<ActorSystemSingleton>();
 builder.Services.AddHostedService<AkkaHostedService>();
+
 builder.Services.AddControllers();
 
 builder.Services.AddEndpointsApiExplorer();
@@ -113,13 +115,14 @@ async Task BootstrapNodeAsync(IServiceProvider services, string[] args)
     }
     catch (Exception ex)
     {
-        Console.WriteLine($"ERRO CRÍTICO no registro: {ex.Message}. O nó não pode se juntar à rede e permanecerá em modo de espera.");
+        Console.WriteLine(
+            $"ERRO CRÍTICO no registro: {ex.Message}. O nó não pode se juntar à rede e permanecerá em modo de espera.");
     }
-    
+
     var _generativeService = services.GetRequiredService<GenerativeService>();
     string modelPath = Path.Combine(Environment.CurrentDirectory, "Dayson", "Dayson.json");
     var datasetPath = Path.Combine(Environment.CurrentDirectory, "Dayson", "pt_0.txt");
-    
+
     if (!File.Exists(modelPath))
     {
         if (!File.Exists(datasetPath))
@@ -130,43 +133,89 @@ async Task BootstrapNodeAsync(IServiceProvider services, string[] args)
 
         Console.WriteLine("\n========================================");
         Console.WriteLine("CONFIGURAÇÃO DE TREINAMENTO OTIMIZADA");
+        Console.WriteLine("MODO: LONGO PRAZO (100 ÉPOCAS / 20 DIAS)");
         Console.WriteLine("========================================");
 
         var vocabManager = new VocabularyManager();
-        
-        // ===== VOCABULÁRIO OTIMIZADO =====
-        // Reduzido para 10.000 tokens (em vez de 50.000+)
-        // Isso reduz o tamanho da camada de saída em 80%
         int vocabSize = vocabManager.BuildVocabulary(datasetPath, maxVocabSize: 20000);
+
         if (vocabSize == 0)
         {
             Console.WriteLine("Falha ao construir ou carregar o vocabulário.");
             return;
         }
+
+        // === NOVO: Configuração para treinamento longo ===
         var trainer = new Trainer(
-            datasetPath, 
-            epochs: 50,           // Reduzido de 100 para 30
-            learningRate: 0.0001,  // Aumentado de 0.0001 para 0.001 (convergência mais rápida)
+            datasetPath,
+            epochs: 100, // 100 épocas conforme requisito
+            learningRate: 0.0001,
             validationSplit: 0.2,
-            batchSize: 32
+            batchSize: 24 // Reduzido de 32 para 24 (menos memória)
         );
+
         Console.WriteLine($"\n[Config] Vocabulário: {vocabSize} tokens");
         Console.WriteLine($"[Config] Hidden Size: 256");
-        Console.WriteLine($"[Config] Context Window: 3 timesteps");
+        Console.WriteLine($"[Config] Embedding Size: 128");
         Console.WriteLine($"[Config] Épocas: {trainer.epochs}");
         Console.WriteLine($"[Config] Learning Rate: {trainer.learningRate}");
-        Console.WriteLine($"[Config] Batch Size: {trainer.batchSize}");
-        Console.WriteLine($"[Config] Validação: {trainer.validationSplit *100}%\n");
+        Console.WriteLine($"[Config] Batch Size: {trainer.batchSize} (otimizado para memória)");
+        Console.WriteLine($"[Config] Validação: {trainer.validationSplit * 100}%");
+        Console.WriteLine($"[Config] META: RAM < 10GB durante 20 dias\n");
+
+        // === NOVO: Inicia MemoryMonitor ===
+        using var memoryMonitor = new MemoryMonitor();
+
+        // Configura callbacks automáticos
+        memoryMonitor.OnWarning = () =>
+        {
+            Console.WriteLine("[MemoryMonitor] Callback: Executando GC otimizado...");
+            GC.Collect(1, GCCollectionMode.Optimized, false);
+        };
+
+        memoryMonitor.OnCritical = () =>
+        {
+            Console.WriteLine("[MemoryMonitor] Callback: Executando GC agressivo...");
+            GC.Collect(2, GCCollectionMode.Forced, true, true);
+            GC.WaitForPendingFinalizers();
+        };
+
+        memoryMonitor.OnEmergency = () =>
+        {
+            Console.ForegroundColor = ConsoleColor.Red;
+            Console.WriteLine("[MemoryMonitor] EMERGÊNCIA: Considere reduzir batch size ou pausar treinamento!");
+            Console.ResetColor();
+        };
+
+        // Inicia monitoramento a cada 30 segundos
+        memoryMonitor.Start(intervalSeconds: 30);
 
         Console.WriteLine("========================================");
         Console.WriteLine("INICIANDO TREINAMENTO");
-        Console.WriteLine("Tempo estimado: 8-16 horas (CPU)");
+        Console.WriteLine("Duração estimada: 20 dias");
+        Console.WriteLine("Monitoramento de memória: ATIVO");
         Console.WriteLine("========================================\n");
 
-        await _generativeService.TrainModelAsync(trainer);
-        Console.WriteLine("\n========================================");
-        Console.WriteLine("TREINAMENTO CONCLUÍDO!");
-        Console.WriteLine("========================================");
+        try
+        {
+            await _generativeService.TrainModelAsync(trainer);
+
+            Console.WriteLine("\n========================================");
+            Console.WriteLine("TREINAMENTO CONCLUÍDO COM SUCESSO!");
+            Console.WriteLine("========================================");
+        }
+        catch (Exception ex)
+        {
+            Console.ForegroundColor = ConsoleColor.Red;
+            Console.WriteLine($"\n[ERRO] Treinamento falhou: {ex.Message}");
+            Console.WriteLine($"Stack Trace: {ex.StackTrace}");
+            Console.ResetColor();
+        }
+        finally
+        {
+            // Para monitor e mostra relatório
+            memoryMonitor.Stop();
+        }
     }
     else
     {
