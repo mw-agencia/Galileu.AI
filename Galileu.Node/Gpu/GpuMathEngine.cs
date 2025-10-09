@@ -1,5 +1,7 @@
+using Galileu.Node.Core;
 using Galileu.Node.Interfaces;
 using OpenCL.NetCore;
+using System;
 using static OpenCL.NetCore.Cl;
 
 namespace Galileu.Node.Gpu;
@@ -7,14 +9,13 @@ namespace Galileu.Node.Gpu;
 public class GpuMathEngine : IMathEngine
 {
     private int _operationsWithoutSync = 0;
-    private const int SYNC_INTERVAL = 16; // Sincroniza a cada 100 operações
+    private const int SYNC_INTERVAL = 16;
     public bool IsGpu => true;
 
     private readonly Context _context;
     private readonly CommandQueue _commandQueue;
     private readonly OpenCL.NetCore.Program _program;
 
-    // Campos de Kernel existentes
     private readonly Kernel _matrixMultiplyKernel;
     private readonly Kernel _addKernel;
     private readonly Kernel _addBroadcastKernel;
@@ -30,8 +31,6 @@ public class GpuMathEngine : IMathEngine
     private readonly Kernel _matrixMultiplyTransposeBKernel;
     private readonly Kernel _addScaledKernel;
     private readonly Kernel _subtractScaledKernel;
-
-    // *** NOVOS CAMPOS DE KERNEL ADICIONADOS ***
     private readonly Kernel _sliceKernel;
     private readonly Kernel _setKernel;
     private readonly Kernel _clipKernel;
@@ -39,15 +38,12 @@ public class GpuMathEngine : IMathEngine
     private readonly Kernel _softmaxKernel;
     private readonly Kernel _lookupKernel;
     private readonly Kernel _accumulateGradientKernel;
+    private readonly Kernel _softmaxCrossEntropyGradientKernel;
 
     private bool _disposed = false;
 
     #region Kernels OpenCL
     
-    /// <summary>
-    /// Força sincronização da fila de comandos OpenCL.
-    /// CRÍTICO: Evita race conditions e memory thrashing.
-    /// </summary>
     public void Synchronize()
     {
         ErrorCode error = Finish(_commandQueue);
@@ -58,10 +54,6 @@ public class GpuMathEngine : IMathEngine
         _operationsWithoutSync = 0;
     }
 
-    /// <summary>
-    /// Sincronização periódica automática para prevenir sobrecarga.
-    /// Deve ser chamada após cada operação crítica.
-    /// </summary>
     private void MaybeSynchronize()
     {
         _operationsWithoutSync++;
@@ -71,7 +63,6 @@ public class GpuMathEngine : IMathEngine
         }
     }
 
-    // *** STRING DE KERNELS ATUALIZADA ***
     private const string ProgramSource = @"
             // KERNELS DO FORWARD PASS
             __kernel void matrix_multiply(__global const float* A, __global const float* B, __global float* C, int M, int N, int P) { int i = get_global_id(0); int j = get_global_id(1); if (i < M && j < P) { float sum = 0.0f; for (int k = 0; k < N; ++k) { sum += A[i * N + k] * B[k * P + j]; } C[i * P + j] = sum; } }
@@ -91,48 +82,14 @@ public class GpuMathEngine : IMathEngine
             __kernel void matrix_multiply_transpose_b(__global const float* A, __global const float* B, __global float* C, int M, int K, int P) { int i = get_global_id(0); int j = get_global_id(1); if (i < M && j < P) { float sum = 0.0f; for (int k = 0; k < K; ++k) { sum += A[i * K + k] * B[j * K + k]; } C[i * P + j] = sum; } }
             __kernel void add_scaled(__global float* target, __global const float* source, float scalar) { int gid = get_global_id(0); target[gid] += source[gid] * scalar; }
             __kernel void subtract_scaled(__global float* target, __global const float* source, float scalar) { int gid = get_global_id(0); target[gid] -= source[gid] * scalar; }
-
-            // NOVOS KERNELS
             __kernel void slice(__global const float* source, __global float* dest, int offset, int size) { int gid = get_global_id(0); if (gid < size) { dest[gid] = source[offset + gid]; } }
             __kernel void set(__global float* dest, __global const float* source, int offset, int size) { int gid = get_global_id(0); if (gid < size) { dest[offset + gid] = source[gid]; } }
             __kernel void clip(__global float* data, float min_val, float max_val) { int gid = get_global_id(0); data[gid] = fmax(min_val, fmin(max_val, data[gid])); }
             __kernel void scale(__global float* data, float scalar) { int gid = get_global_id(0); data[gid] *= scalar; }
-            __kernel void softmax(__global const float* input, __global float* output, int size) {
-    int row = get_global_id(0);
-    int offset = row * size;
-    
-    // Encontra o máximo para estabilidade numérica
-    float maxVal = input[offset];
-    for (int i = 1; i < size; i++) {
-        float val = input[offset + i];
-        if (val > maxVal) maxVal = val;
-    }
-    
-    // Calcula exp(x - max) e soma
-    float sumExp = 0.0f;
-    for (int i = 0; i < size; i++) {
-        output[offset + i] = exp(input[offset + i] - maxVal);
-        sumExp += output[offset + i];
-    }
-    
-    // Normaliza
-    for (int i = 0; i < size; i++) {
-        output[offset + i] /= sumExp;
-    }
-}
-    __kernel void lookup(__global const float* embedding_matrix, __global float* result, int index, int embedding_size) {
-    int gid = get_global_id(0);
-    if (gid < embedding_size) {
-        result[gid] = embedding_matrix[index * embedding_size + gid];
-    }
-}   
-    __kernel void accumulate_gradient_no_atomic(__global float* embedding_gradients, __global const float* gradient, int index, int embedding_size) {
-    int gid = get_global_id(0);
-    if (gid < embedding_size) {
-        embedding_gradients[index * embedding_size + gid] += gradient[gid];
-    }
-}
-
+            __kernel void softmax(__global const float* input, __global float* output, int size) { int row = get_global_id(0); int offset = row * size; float maxVal = input[offset]; for (int i = 1; i < size; i++) { float val = input[offset + i]; if (val > maxVal) maxVal = val; } float sumExp = 0.0f; for (int i = 0; i < size; i++) { output[offset + i] = exp(input[offset + i] - maxVal); sumExp += output[offset + i]; } for (int i = 0; i < size; i++) { output[offset + i] /= sumExp; } }
+            __kernel void lookup(__global const float* embedding_matrix, __global float* result, int index, int embedding_size) { int gid = get_global_id(0); if (gid < embedding_size) { result[gid] = embedding_matrix[index * embedding_size + gid]; } }   
+            __kernel void accumulate_gradient_no_atomic(__global float* embedding_gradients, __global const float* gradient, int index, int embedding_size) { int gid = get_global_id(0); if (gid < embedding_size) { embedding_gradients[index * embedding_size + gid] += gradient[gid]; } }
+            __kernel void softmax_cross_entropy_gradient(__global float* data, __global const int* targets, int vocab_size) { int t = get_global_id(0); int target_idx = targets[t]; int flat_idx = t * vocab_size + target_idx; data[flat_idx] -= 1.0f; }
         ";
 
     #endregion
@@ -140,7 +97,6 @@ public class GpuMathEngine : IMathEngine
     public GpuMathEngine()
     {
         ErrorCode error;
-        // ... (código de inicialização da plataforma e dispositivo) ...
         Platform[] platforms = GetPlatformIDs(out error);
         CheckError(error, "Erro ao obter plataformas OpenCL.");
         if (platforms.Length == 0) throw new InvalidOperationException("Nenhuma plataforma OpenCL encontrada.");
@@ -167,7 +123,6 @@ public class GpuMathEngine : IMathEngine
             throw new OpenClException($"Erro ao compilar kernels OpenCL: {buildLog}", error);
         }
 
-        // Criação dos kernels existentes
         _matrixMultiplyKernel = CreateKernel(_program, "matrix_multiply", out error); CheckError(error);
         _addKernel = CreateKernel(_program, "add", out error); CheckError(error);
         _addBroadcastKernel = CreateKernel(_program, "add_broadcast", out error); CheckError(error);
@@ -183,8 +138,6 @@ public class GpuMathEngine : IMathEngine
         _matrixMultiplyTransposeBKernel = CreateKernel(_program, "matrix_multiply_transpose_b", out error); CheckError(error);
         _addScaledKernel = CreateKernel(_program, "add_scaled", out error); CheckError(error);
         _subtractScaledKernel = CreateKernel(_program, "subtract_scaled", out error); CheckError(error);
-        
-        // *** CRIAÇÃO DOS NOVOS KERNELS ***
         _sliceKernel = CreateKernel(_program, "slice", out error); CheckError(error);
         _setKernel = CreateKernel(_program, "set", out error); CheckError(error);
         _clipKernel = CreateKernel(_program, "clip", out error); CheckError(error);
@@ -192,13 +145,12 @@ public class GpuMathEngine : IMathEngine
         _softmaxKernel = CreateKernel(_program, "softmax", out error); CheckError(error);
         _lookupKernel = CreateKernel(_program, "lookup", out error); CheckError(error);
         _accumulateGradientKernel = CreateKernel(_program, "accumulate_gradient_no_atomic", out error); CheckError(error);
+        _softmaxCrossEntropyGradientKernel = CreateKernel(_program, "softmax_cross_entropy_gradient", out error); CheckError(error);
     }
 
     public IMathTensor CreateTensor(int[] shape) => new GpuTensor(shape, _context, _commandQueue);
     public IMathTensor CreateTensor(double[] data, int[] shape) => new GpuTensor(data, shape, _context, _commandQueue);
 
-    // --- (Todos os seus métodos de operação existentes: MatrixMultiply, Add, etc.) ---
-    // ...
     public void MatrixMultiply(IMathTensor a, IMathTensor b, IMathTensor result)
     {
         var tensorA = (GpuTensor)a;
@@ -207,18 +159,14 @@ public class GpuMathEngine : IMathEngine
         int M = tensorA.Shape[0];
         int N = tensorA.Shape[1];
         int P = tensorB.Shape[1];
-        
         SetKernelArg(_matrixMultiplyKernel, 0, tensorA.Buffer);
         SetKernelArg(_matrixMultiplyKernel, 1, tensorB.Buffer);
         SetKernelArg(_matrixMultiplyKernel, 2, tensorC.Buffer);
         SetKernelArg(_matrixMultiplyKernel, 3, (uint)M);
         SetKernelArg(_matrixMultiplyKernel, 4, (uint)N);
         SetKernelArg(_matrixMultiplyKernel, 5, (uint)P);
-        
-        EnqueueNDRangeKernel(_commandQueue, _matrixMultiplyKernel, 2, null, 
-            new[] { (IntPtr)M, (IntPtr)P }, null, 0, null, out _);
-        
-        MaybeSynchronize(); // NOVO: Sincronização periódica
+        EnqueueNDRangeKernel(_commandQueue, _matrixMultiplyKernel, 2, null, new[] { (IntPtr)M, (IntPtr)P }, null, 0, null, out _);
+        MaybeSynchronize();
     }
 
     public void Add(IMathTensor a, IMathTensor b, IMathTensor result)
@@ -234,8 +182,7 @@ public class GpuMathEngine : IMathEngine
         SetKernelArg(_addBroadcastKernel, 0, ((GpuTensor)a).Buffer);
         SetKernelArg(_addBroadcastKernel, 1, ((GpuTensor)bias).Buffer);
         SetKernelArg(_addBroadcastKernel, 2, (uint)bias.Length);
-        EnqueueNDRangeKernel(_commandQueue, _addBroadcastKernel, 1, null, new[] { (IntPtr)a.Length }, null, 0, null,
-            out _);
+        EnqueueNDRangeKernel(_commandQueue, _addBroadcastKernel, 1, null, new[] { (IntPtr)a.Length }, null, 0, null, out _);
     }
 
     public void Multiply(IMathTensor a, IMathTensor b, IMathTensor result)
@@ -264,11 +211,17 @@ public class GpuMathEngine : IMathEngine
     {
         var gpuTensor = (GpuTensor)tensor;
         var newTensor = CreateTensor(gpuTensor.Shape) as GpuTensor;
-        SetKernelArg(_cloneKernel, 0, gpuTensor.Buffer);
-        SetKernelArg(_cloneKernel, 1, newTensor!.Buffer);
-        EnqueueNDRangeKernel(_commandQueue, _cloneKernel, 1, null, new[] { (IntPtr)gpuTensor.Length }, null, 0, null,
-            out _);
+        Copy(gpuTensor, newTensor!);
         return newTensor;
+    }
+
+    public void Copy(IMathTensor source, IMathTensor destination)
+    {
+        var gpuSource = (GpuTensor)source;
+        var gpuDestination = (GpuTensor)destination;
+        SetKernelArg(_cloneKernel, 0, gpuSource.Buffer);
+        SetKernelArg(_cloneKernel, 1, gpuDestination.Buffer);
+        EnqueueNDRangeKernel(_commandQueue, _cloneKernel, 1, null, new[] { (IntPtr)gpuSource.Length }, null, 0, null, out _);
     }
 
     public void Transpose(IMathTensor input, IMathTensor result)
@@ -281,8 +234,7 @@ public class GpuMathEngine : IMathEngine
         SetKernelArg(_transposeKernel, 1, tensorOut.Buffer);
         SetKernelArg(_transposeKernel, 2, (uint)rows);
         SetKernelArg(_transposeKernel, 3, (uint)cols);
-        EnqueueNDRangeKernel(_commandQueue, _transposeKernel, 2, null, new[] { (IntPtr)rows, (IntPtr)cols }, null, 0,
-            null, out _);
+        EnqueueNDRangeKernel(_commandQueue, _transposeKernel, 2, null, new[] { (IntPtr)rows, (IntPtr)cols }, null, 0, null, out _);
     }
 
     public void Subtract(IMathTensor a, IMathTensor b, IMathTensor result)
@@ -297,16 +249,14 @@ public class GpuMathEngine : IMathEngine
     {
         SetKernelArg(_sigmoidDerivativeKernel, 0, ((GpuTensor)output).Buffer);
         SetKernelArg(_sigmoidDerivativeKernel, 1, ((GpuTensor)result).Buffer);
-        EnqueueNDRangeKernel(_commandQueue, _sigmoidDerivativeKernel, 1, null, new[] { (IntPtr)output.Length }, null, 0,
-            null, out _);
+        EnqueueNDRangeKernel(_commandQueue, _sigmoidDerivativeKernel, 1, null, new[] { (IntPtr)output.Length }, null, 0, null, out _);
     }
 
     public void TanhDerivative(IMathTensor output, IMathTensor result)
     {
         SetKernelArg(_tanhDerivativeKernel, 0, ((GpuTensor)output).Buffer);
         SetKernelArg(_tanhDerivativeKernel, 1, ((GpuTensor)result).Buffer);
-        EnqueueNDRangeKernel(_commandQueue, _tanhDerivativeKernel, 1, null, new[] { (IntPtr)output.Length }, null, 0,
-            null, out _);
+        EnqueueNDRangeKernel(_commandQueue, _tanhDerivativeKernel, 1, null, new[] { (IntPtr)output.Length }, null, 0, null, out _);
     }
 
     public void MatrixMultiplyTransposeA(IMathTensor a, IMathTensor b, IMathTensor result)
@@ -323,8 +273,7 @@ public class GpuMathEngine : IMathEngine
         SetKernelArg(_matrixMultiplyTransposeAKernel, 3, (uint)M);
         SetKernelArg(_matrixMultiplyTransposeAKernel, 4, (uint)K);
         SetKernelArg(_matrixMultiplyTransposeAKernel, 5, (uint)P);
-        EnqueueNDRangeKernel(_commandQueue, _matrixMultiplyTransposeAKernel, 2, null, new[] { (IntPtr)M, (IntPtr)P },
-            null, 0, null, out _);
+        EnqueueNDRangeKernel(_commandQueue, _matrixMultiplyTransposeAKernel, 2, null, new[] { (IntPtr)M, (IntPtr)P }, null, 0, null, out _);
     }
 
     public void MatrixMultiplyTransposeB(IMathTensor a, IMathTensor b, IMathTensor result)
@@ -341,8 +290,7 @@ public class GpuMathEngine : IMathEngine
         SetKernelArg(_matrixMultiplyTransposeBKernel, 3, (uint)M);
         SetKernelArg(_matrixMultiplyTransposeBKernel, 4, (uint)K);
         SetKernelArg(_matrixMultiplyTransposeBKernel, 5, (uint)P);
-        EnqueueNDRangeKernel(_commandQueue, _matrixMultiplyTransposeBKernel, 2, null, new[] { (IntPtr)M, (IntPtr)P },
-            null, 0, null, out _);
+        EnqueueNDRangeKernel(_commandQueue, _matrixMultiplyTransposeBKernel, 2, null, new[] { (IntPtr)M, (IntPtr)P }, null, 0, null, out _);
     }
 
     public void AddScaled(IMathTensor target, IMathTensor source, double scalar)
@@ -350,8 +298,7 @@ public class GpuMathEngine : IMathEngine
         SetKernelArg(_addScaledKernel, 0, ((GpuTensor)target).Buffer);
         SetKernelArg(_addScaledKernel, 1, ((GpuTensor)source).Buffer);
         SetKernelArg(_addScaledKernel, 2, (float)scalar);
-        EnqueueNDRangeKernel(_commandQueue, _addScaledKernel, 1, null, new[] { (IntPtr)target.Length }, null, 0, null,
-            out _);
+        EnqueueNDRangeKernel(_commandQueue, _addScaledKernel, 1, null, new[] { (IntPtr)target.Length }, null, 0, null, out _);
     }
 
     public void SubtractScaled(IMathTensor target, IMathTensor source, double scalar)
@@ -359,11 +306,9 @@ public class GpuMathEngine : IMathEngine
         SetKernelArg(_subtractScaledKernel, 0, ((GpuTensor)target).Buffer);
         SetKernelArg(_subtractScaledKernel, 1, ((GpuTensor)source).Buffer);
         SetKernelArg(_subtractScaledKernel, 2, (float)scalar);
-        EnqueueNDRangeKernel(_commandQueue, _subtractScaledKernel, 1, null, new[] { (IntPtr)target.Length }, null, 0,
-            null, out _);
+        EnqueueNDRangeKernel(_commandQueue, _subtractScaledKernel, 1, null, new[] { (IntPtr)target.Length }, null, 0, null, out _);
     }
 
-    // *** IMPLEMENTAÇÃO DOS NOVOS MÉTODOS ***
     public void Slice(IMathTensor source, int rowIndex, IMathTensor destination)
     {
         var featureSize = (int)destination.Length;
@@ -398,8 +343,7 @@ public class GpuMathEngine : IMathEngine
     {
         SetKernelArg(_scaleKernel, 0, ((GpuTensor)tensor).Buffer);
         SetKernelArg(_scaleKernel, 1, (float)scalar);
-        EnqueueNDRangeKernel(_commandQueue, _scaleKernel, 1, null, 
-            new[] { (IntPtr)tensor.Length }, null, 0, null, out _);
+        EnqueueNDRangeKernel(_commandQueue, _scaleKernel, 1, null, new[] { (IntPtr)tensor.Length }, null, 0, null, out _);
     }
     
     public void Softmax(IMathTensor input, IMathTensor result)
@@ -408,13 +352,10 @@ public class GpuMathEngine : IMathEngine
         var tensorOut = (GpuTensor)result;
         int rows = tensorIn.Shape[0];
         int cols = tensorIn.Shape[1];
-    
         SetKernelArg(_softmaxKernel, 0, tensorIn.Buffer);
         SetKernelArg(_softmaxKernel, 1, tensorOut.Buffer);
         SetKernelArg(_softmaxKernel, 2, (uint)cols);
-    
-        EnqueueNDRangeKernel(_commandQueue, _softmaxKernel, 1, null, 
-            new[] { (IntPtr)rows }, null, 0, null, out _);
+        EnqueueNDRangeKernel(_commandQueue, _softmaxKernel, 1, null, new[] { (IntPtr)rows }, null, 0, null, out _);
     }
     
     public void Lookup(IMathTensor embeddingMatrix, int index, IMathTensor result)
@@ -436,13 +377,35 @@ public class GpuMathEngine : IMathEngine
         SetKernelArg(_accumulateGradientKernel, 3, (uint)embeddingSize);
         EnqueueNDRangeKernel(_commandQueue, _accumulateGradientKernel, 1, null, new[] { (IntPtr)embeddingSize }, null, 0, null, out _);
     }
+    
+    public void SoftmaxCrossEntropyGradient(IMathTensor predictions, int[] targetIndices, IMathTensor result)
+    {
+        this.Copy(predictions, result);
+
+        ErrorCode error;
+        var targetsGpuBuffer = (Mem)CreateBuffer(_context, MemFlags.ReadOnly | MemFlags.CopyHostPtr, 
+            (IntPtr)(targetIndices.Length * sizeof(int)), targetIndices, out error);
+        CheckError(error);
+
+        try
+        {
+            SetKernelArg(_softmaxCrossEntropyGradientKernel, 0, ((GpuTensor)result).Buffer);
+            SetKernelArg(_softmaxCrossEntropyGradientKernel, 1, targetsGpuBuffer);
+            SetKernelArg(_softmaxCrossEntropyGradientKernel, 2, (uint)predictions.Shape[1]);
+
+            EnqueueNDRangeKernel(_commandQueue, _softmaxCrossEntropyGradientKernel, 1, null, 
+                new[] { (IntPtr)targetIndices.Length }, null, 0, null, out _);
+        }
+        finally
+        {
+            ReleaseMemObject(targetsGpuBuffer);
+        }
+    }
 
     public void Dispose()
     {
         if (_disposed) return;
     
-        // >>> INÍCIO DA MODIFICAÇÃO <<<
-        // CRÍTICO: Sincroniza ANTES de liberar recursos
         try
         {
             Synchronize();
@@ -451,9 +414,7 @@ public class GpuMathEngine : IMathEngine
         {
             Console.WriteLine($"[GPU] Erro na sincronização final: {ex.Message}");
         }
-        // >>> FIM DA MODIFICAÇÃO <<<
 
-        ReleaseKernel(_matrixMultiplyKernel);
         ReleaseKernel(_matrixMultiplyKernel);
         ReleaseKernel(_addKernel);
         ReleaseKernel(_addBroadcastKernel);
@@ -469,8 +430,6 @@ public class GpuMathEngine : IMathEngine
         ReleaseKernel(_matrixMultiplyTransposeBKernel);
         ReleaseKernel(_addScaledKernel);
         ReleaseKernel(_subtractScaledKernel);
-        
-        // *** LIBERAÇÃO DOS NOVOS KERNELS ***
         ReleaseKernel(_sliceKernel);
         ReleaseKernel(_setKernel);
         ReleaseKernel(_clipKernel);
@@ -478,14 +437,14 @@ public class GpuMathEngine : IMathEngine
         ReleaseKernel(_softmaxKernel);
         ReleaseKernel(_lookupKernel);
         ReleaseKernel(_accumulateGradientKernel);
+        ReleaseKernel(_softmaxCrossEntropyGradientKernel);
 
         ReleaseProgram(_program);
         ReleaseCommandQueue(_commandQueue);
         ReleaseContext(_context);
-        _disposed = true;
-        GC.SuppressFinalize(this);
         
         _disposed = true;
+        GC.SuppressFinalize(this);
     }
 
     private void CheckError(ErrorCode error, string message = "Erro OpenCL não especificado.")

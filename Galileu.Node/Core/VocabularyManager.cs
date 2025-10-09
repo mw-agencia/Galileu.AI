@@ -18,13 +18,19 @@ public class VocabularyManager
     public Dictionary<int, string> ReverseVocab => reverseVocab;
     public int VocabSize => vocab.Count;
 
-    public int BuildVocabulary(string datasetPath, int maxVocabSize = 20000)
+    public int BuildVocabulary(string datasetPath, int maxVocabSize)
     {
         if (!File.Exists(datasetPath))
         {
             Console.WriteLine($"[VocabularyManager] ERRO: Arquivo de dataset não encontrado: {datasetPath}");
             return 0;
         }
+        if (File.Exists(VocabFilePath))
+        {
+            Console.WriteLine($"[VocabularyManager]: Construindo vocabulário encontrado: {VocabFilePath}");
+            return LoadVocabulary();
+        }
+        
 
         Console.WriteLine($"[VocabularyManager] Construindo vocabulário (máx: {maxVocabSize} tokens)...");
         

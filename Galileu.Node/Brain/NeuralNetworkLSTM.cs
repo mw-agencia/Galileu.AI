@@ -1,7 +1,3 @@
-using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
 using System.Text.Json;
 using Galileu.Node.Core;
 using Galileu.Node.Interfaces;
@@ -11,7 +7,8 @@ namespace Galileu.Node.Brain;
 public class NeuralNetworkLSTM : IDisposable
 {
     private readonly AdamOptimizer _adamOptimizer;
-    private HybridLstmCacheManager? _cacheManager;
+    private DiskLstmCacheManager? _cacheManager;
+    private readonly Dictionary<string, IMathTensor> _reusableGradients;
 
     public IMathTensor? weightsEmbedding { get; set; }
     public IMathTensor? weightsInputForget { get; set; }
@@ -80,6 +77,8 @@ public class NeuralNetworkLSTM : IDisposable
         biasOutput = InitializeTensor(1, hiddenSize, rand);
         weightsHiddenOutputFinal = InitializeTensor(hiddenSize, outputSize, rand);
         biasOutputFinal = InitializeTensor(1, outputSize, rand);
+        
+        _reusableGradients = InitializeGradients();
     }
 
     protected NeuralNetworkLSTM(
@@ -118,6 +117,39 @@ public class NeuralNetworkLSTM : IDisposable
 
         hiddenState = _mathEngine.CreateTensor(new[] { 1, hiddenSize });
         cellState = _mathEngine.CreateTensor(new[] { 1, hiddenSize });
+        
+        _reusableGradients = InitializeGradients();
+    }
+
+    private Dictionary<string, IMathTensor> InitializeGradients()
+    {
+        int embeddingSize = weightsEmbedding!.Shape[1];
+        return new Dictionary<string, IMathTensor>
+        {
+            { "w_embed", _mathEngine.CreateTensor(new[] { inputSize, embeddingSize }) },
+            { "wif", _mathEngine.CreateTensor(new[] { embeddingSize, hiddenSize }) },
+            { "whf", _mathEngine.CreateTensor(new[] { hiddenSize, hiddenSize }) },
+            { "wii", _mathEngine.CreateTensor(new[] { embeddingSize, hiddenSize }) },
+            { "whi", _mathEngine.CreateTensor(new[] { hiddenSize, hiddenSize }) },
+            { "wic", _mathEngine.CreateTensor(new[] { embeddingSize, hiddenSize }) },
+            { "whc", _mathEngine.CreateTensor(new[] { hiddenSize, hiddenSize }) },
+            { "wio", _mathEngine.CreateTensor(new[] { embeddingSize, hiddenSize }) },
+            { "who", _mathEngine.CreateTensor(new[] { hiddenSize, hiddenSize }) },
+            { "why", _mathEngine.CreateTensor(new[] { hiddenSize, outputSize }) },
+            { "bf", _mathEngine.CreateTensor(new[] { 1, hiddenSize }) },
+            { "bi", _mathEngine.CreateTensor(new[] { 1, hiddenSize }) },
+            { "bc", _mathEngine.CreateTensor(new[] { 1, hiddenSize }) },
+            { "bo", _mathEngine.CreateTensor(new[] { 1, hiddenSize }) },
+            { "by", _mathEngine.CreateTensor(new[] { 1, outputSize }) }
+        };
+    }
+    
+    private void ZeroOutGradients()
+    {
+        foreach (var grad in _reusableGradients.Values)
+        {
+            _mathEngine.Scale(grad, 0.0);
+        }
     }
 
     private IMathTensor InitializeTensor(int rows, int cols, Random rand)
@@ -220,26 +252,25 @@ public class NeuralNetworkLSTM : IDisposable
         return output;
     }
 
-    public double TrainSequence(int[] inputIndices, Tensor[] targets, double learningRate)
+    public double TrainSequence(int[] inputIndices, int[] targetIndices, double learningRate)
     {
         _cacheManager?.Dispose();
-        _cacheManager = new HybridLstmCacheManager(_mathEngine, weightsEmbedding!.Shape[1], hiddenSize, inputIndices.Length);
+        _cacheManager = new DiskLstmCacheManager(_mathEngine, weightsEmbedding!.Shape[1], hiddenSize, inputIndices.Length);
 
-        using var targetsGpu = CreateSequenceTensor(targets);
+        var (predictions, loss) = ForwardPassGpuOptimized(inputIndices, targetIndices, inputIndices.Length);
+        
+        ZeroOutGradients();
+        BackwardPassGpuOptimized(predictions, inputIndices, targetIndices, inputIndices.Length, _reusableGradients);
 
-        var (predictions, loss) = ForwardPassGpuOptimized(inputIndices, targetsGpu, inputIndices.Length);
-        var gradients = BackwardPassGpuOptimized(targetsGpu, predictions, inputIndices, inputIndices.Length);
-
-        UpdateWeightsWithAdamGpu(gradients, learningRate);
+        UpdateWeightsWithAdamGpu(_reusableGradients, learningRate);
 
         predictions.Dispose();
-        foreach (var grad in gradients.Values) grad.Dispose();
-
+        
         return loss;
     }
 
     private (IMathTensor predictions, double loss) ForwardPassGpuOptimized(
-        int[] inputIndices, IMathTensor targets, int sequenceLength)
+        int[] inputIndices, int[] targetIndices, int sequenceLength)
     {
         var predictions = _mathEngine.CreateTensor(new[] { sequenceLength, outputSize });
         double sequenceLoss = 0;
@@ -334,16 +365,13 @@ public class NeuralNetworkLSTM : IDisposable
             }
 
             var predData = predictions.ToCpuTensor().GetData();
-            var targetData = targets.ToCpuTensor().GetData();
             for (int t = 0; t < sequenceLength; t++)
             {
-                int offset = t * outputSize;
-                int targetLocalIndex = Array.IndexOf(targetData, 1.0, offset, outputSize);
-                if (targetLocalIndex != -1)
-                {
-                    double prob = Math.Max(predData[targetLocalIndex], 1e-9);
-                    sequenceLoss += -Math.Log(prob);
-                }
+                int targetIndex = targetIndices[t];
+                int flatIndex = t * outputSize + targetIndex;
+                
+                double prob = Math.Max(predData[flatIndex], 1e-9);
+                sequenceLoss += -Math.Log(prob);
             }
 
             return (predictions, sequenceLoss / Math.Max(sequenceLength, 1));
@@ -360,12 +388,9 @@ public class NeuralNetworkLSTM : IDisposable
         }
     }
 
-    private Dictionary<string, IMathTensor> BackwardPassGpuOptimized(
-        IMathTensor targets, IMathTensor predictions,
-        int[] inputIndices, int sequenceLength)
+    private void BackwardPassGpuOptimized(
+        IMathTensor predictions, int[] inputIndices, int[] targetIndices, int sequenceLength, Dictionary<string, IMathTensor> grads)
     {
-        var grads = InitializeGradientsGpu();
-
         IMathTensor? dh_next = _tensorPool!.Rent(new[] { 1, hiddenSize });
         IMathTensor? dc_next = _tensorPool.Rent(new[] { 1, hiddenSize });
         IMathTensor? dy = _tensorPool.Rent(new[] { sequenceLength, outputSize });
@@ -385,7 +410,7 @@ public class NeuralNetworkLSTM : IDisposable
 
         try
         {
-            _mathEngine.Subtract(predictions, targets, dy);
+            _mathEngine.SoftmaxCrossEntropyGradient(predictions, targetIndices, dy);
 
             for (int t = sequenceLength - 1; t >= 0; t--)
             {
@@ -525,8 +550,6 @@ public class NeuralNetworkLSTM : IDisposable
                     _mathEngine.Scale(grad, clipScale);
                 }
             }
-
-            return grads;
         }
         finally
         {
@@ -574,43 +597,6 @@ public class NeuralNetworkLSTM : IDisposable
         }
     }
 
-    private Dictionary<string, IMathTensor> InitializeGradientsGpu()
-    {
-        int embeddingSize = weightsEmbedding!.Shape[1];
-        return new Dictionary<string, IMathTensor>
-        {
-            { "w_embed", _mathEngine.CreateTensor(new[] { inputSize, embeddingSize }) },
-            { "wif", _mathEngine.CreateTensor(new[] { embeddingSize, hiddenSize }) },
-            { "whf", _mathEngine.CreateTensor(new[] { hiddenSize, hiddenSize }) },
-            { "wii", _mathEngine.CreateTensor(new[] { embeddingSize, hiddenSize }) },
-            { "whi", _mathEngine.CreateTensor(new[] { hiddenSize, hiddenSize }) },
-            { "wic", _mathEngine.CreateTensor(new[] { embeddingSize, hiddenSize }) },
-            { "whc", _mathEngine.CreateTensor(new[] { hiddenSize, hiddenSize }) },
-            { "wio", _mathEngine.CreateTensor(new[] { embeddingSize, hiddenSize }) },
-            { "who", _mathEngine.CreateTensor(new[] { hiddenSize, hiddenSize }) },
-            { "why", _mathEngine.CreateTensor(new[] { hiddenSize, outputSize }) },
-            { "bf", _mathEngine.CreateTensor(new[] { 1, hiddenSize }) },
-            { "bi", _mathEngine.CreateTensor(new[] { 1, hiddenSize }) },
-            { "bc", _mathEngine.CreateTensor(new[] { 1, hiddenSize }) },
-            { "bo", _mathEngine.CreateTensor(new[] { 1, hiddenSize }) },
-            { "by", _mathEngine.CreateTensor(new[] { 1, outputSize }) }
-        };
-    }
-
-    private IMathTensor CreateSequenceTensor(Tensor[] sequence)
-    {
-        int sequenceLength = sequence.Length;
-        if (sequenceLength == 0) return _mathEngine.CreateTensor(new[] { 0, 0 });
-        int featureSize = sequence[0].GetShape()[0];
-        var flatData = new double[sequenceLength * featureSize];
-        for (int i = 0; i < sequenceLength; i++)
-        {
-            Array.Copy(sequence[i].GetData(), 0, flatData, i * featureSize, featureSize);
-        }
-
-        return _mathEngine.CreateTensor(flatData, new[] { sequenceLength, featureSize });
-    }
-
     public void Dispose()
     {
         Dispose(true);
@@ -641,6 +627,15 @@ public class NeuralNetworkLSTM : IDisposable
             hiddenState?.Dispose();
             cellState?.Dispose();
             _tensorPool?.Dispose();
+
+            if (_reusableGradients != null)
+            {
+                foreach(var grad in _reusableGradients.Values)
+                {
+                    grad.Dispose();
+                }
+                _reusableGradients.Clear();
+            }
         }
         _disposed = true;
     }
@@ -653,7 +648,6 @@ public class NeuralNetworkLSTM : IDisposable
             EmbeddingSize = this.weightsEmbedding!.Shape[1],
             HiddenSize = this.hiddenSize,
             OutputSize = this.outputSize,
-
             WeightsEmbedding = weightsEmbedding.ToCpuTensor().ToTensorData(),
             WeightsInputForget = weightsInputForget!.ToCpuTensor().ToTensorData(),
             WeightsHiddenForget = weightsHiddenForget!.ToCpuTensor().ToTensorData(),
@@ -711,14 +705,12 @@ public class NeuralNetworkLSTM : IDisposable
         }
     }
 
-    public double CalculateSequenceLoss(int[] inputIndices, Tensor[] targets)
+    public double CalculateSequenceLoss(int[] inputIndices, int[] targetIndices)
     {
         _cacheManager?.Dispose();
-        _cacheManager = new HybridLstmCacheManager(_mathEngine, weightsEmbedding!.Shape[1], hiddenSize, inputIndices.Length);
+        _cacheManager = new DiskLstmCacheManager(_mathEngine, weightsEmbedding!.Shape[1], hiddenSize, inputIndices.Length);
         
-        using var targetsGpu = CreateSequenceTensor(targets);
-        
-        var (predictions, loss) = ForwardPassGpuOptimized(inputIndices, targetsGpu, inputIndices.Length);
+        var (predictions, loss) = ForwardPassGpuOptimized(inputIndices, targetIndices, inputIndices.Length);
         
         predictions.Dispose();
 

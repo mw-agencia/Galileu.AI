@@ -1,6 +1,9 @@
-using Galileu.Node.Core;
 using Galileu.Node.TreeSwapFile;
 using System.Text.Json;
+using System.IO;
+using System.Linq;
+using System.Collections.Generic;
+using System;
 
 namespace Galileu.Node.Services;
 
@@ -21,9 +24,15 @@ public class DatasetService : IDisposable
         _validationOffsets = new List<long>();
     }
 
-    public void InitializeAndSplit(string text, int contextWindow,
-        Dictionary<string, int> vocab, string padToken, int initialBatchSize, double validationSplit)
+    // --- CORREÇÃO: Assinatura do método atualizada para corresponder à chamada ---
+    public void InitializeAndSplit(string datasetPath, int contextWindow,
+        Dictionary<string, int> vocab, int initialBatchSize, double validationSplit)
     {
+        if (!File.Exists(datasetPath))
+            throw new FileNotFoundException("Arquivo de dataset não encontrado no DatasetService.", datasetPath);
+
+        string text = File.ReadAllText(datasetPath);
+        
         lock (_lock)
         {
             _batchSize = initialBatchSize;
@@ -31,32 +40,31 @@ public class DatasetService : IDisposable
             var allOffsets = new List<long>();
             var tokens = text.ToLower().Split(new[] { ' ', '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
             int unkIndex = vocab["<UNK>"];
-            int vocabSize = vocab.Count;
             int totalSamples = 0;
 
-            for (int i = 0; i < tokens.Length - contextWindow; i++)
+            for (int i = 0; i < tokens.Length - contextWindow -1; i++) // Ajuste no loop para evitar OutOfBounds
             {
-                var inputToken = tokens[i + contextWindow - 1]; // Usamos apenas o token anterior para prever o próximo
+                var inputToken = tokens[i + contextWindow - 1];
                 var targetToken = tokens[i + contextWindow];
 
-                int inputIndex = vocab.TryGetValue(inputToken, out var idx) ? idx : unkIndex;
-                var targetTensor = CreateOneHotTensor(targetToken, vocab, vocabSize);
-                
-                var pairData = new SampleIndexData
+                if (vocab.TryGetValue(inputToken, out var inputIndex) && vocab.TryGetValue(targetToken, out var targetIndex))
                 {
-                   InputIndex = inputIndex,
-                   TargetIndex = Array.IndexOf(targetTensor.GetData(), 1.0) // Armazena o índice do alvo
-                };
+                    var pairData = new SampleIndexData
+                    {
+                       InputIndex = inputIndex,
+                       TargetIndex = targetIndex
+                    };
 
-                string json = JsonSerializer.Serialize(pairData);
-                long offset = _storage.StoreData(json);
-                allOffsets.Add(offset);
-                totalSamples++;
+                    string json = JsonSerializer.Serialize(pairData);
+                    long offset = _storage.StoreData(json);
+                    allOffsets.Add(offset);
+                    totalSamples++;
+                }
             }
-            Console.WriteLine($"[DatasetService] Amostras armazenadas: {totalSamples}");
+            Console.WriteLine($"[DatasetService] Amostras válidas armazenadas: {totalSamples}");
 
             _storage.Flush();
-            Console.WriteLine($"[DatasetService] Armazenamento concluído. {allOffsets.Count} amostras válidas totais.");
+            Console.WriteLine($"[DatasetService] Armazenamento concluído. {allOffsets.Count} amostras totais.");
 
             var rnd = new Random();
             allOffsets = allOffsets.OrderBy(x => rnd.Next()).ToList();
@@ -73,12 +81,12 @@ public class DatasetService : IDisposable
         lock (_lock) { _batchSize = Math.Max(1, newSize); }
     }
 
-    public List<(int InputIndex, Tensor Target)>? GetNextTrainChunk() => GetNextChunk(ref _currentTrainIndex, _trainOffsets);
-    public List<(int InputIndex, Tensor Target)>? GetNextValidationChunk() => GetNextChunk(ref _currentValidationIndex, _validationOffsets);
+    public List<(int InputIndex, int TargetIndex)>? GetNextTrainChunk() => GetNextChunk(ref _currentTrainIndex, _trainOffsets);
+    public List<(int InputIndex, int TargetIndex)>? GetNextValidationChunk() => GetNextChunk(ref _currentValidationIndex, _validationOffsets);
 
-    private List<(int InputIndex, Tensor Target)>? GetNextChunk(ref int currentIndex, List<long> offsets)
+    private List<(int InputIndex, int TargetIndex)>? GetNextChunk(ref int currentIndex, List<long> offsets)
     {
-        var chunk = new List<(int, Tensor)>();
+        var chunk = new List<(int, int)>();
         lock (_lock)
         {
             if (currentIndex >= offsets.Count) return null;
@@ -89,29 +97,34 @@ public class DatasetService : IDisposable
                 var pairData = JsonSerializer.Deserialize<SampleIndexData>(json);
                 if (pairData != null)
                 {
-                    double[] targetData = new double[20000]; // ATENÇÃO: Hardcoded vocab size
-                    targetData[pairData.TargetIndex] = 1.0;
-                    chunk.Add((
-                        pairData.InputIndex,
-                        new Tensor(targetData, new [] { 20000 })
-                    ));
+                    chunk.Add((pairData.InputIndex, pairData.TargetIndex));
                 }
             }
             currentIndex = endIndex;
         }
         return chunk;
     }
+    
+    public int GetTotalTrainBatches()
+    {
+        lock (_lock)
+        {
+            if (_batchSize == 0) return 0;
+            return (int)Math.Ceiling((double)_trainOffsets.Count / _batchSize);
+        }
+    }
+
+    public int GetTotalValidationBatches()
+    {
+        lock (_lock)
+        {
+            if (_batchSize == 0) return 0;
+            return (int)Math.Ceiling((double)_validationOffsets.Count / _batchSize);
+        }
+    }
 
     public void ResetTrain() => _currentTrainIndex = 0;
     public void ResetValidation() => _currentValidationIndex = 0;
-
-    private Tensor CreateOneHotTensor(string token, Dictionary<string, int> vocab, int vocabSize)
-    {
-        double[] data = new double[vocabSize];
-        if (vocab.TryGetValue(token, out int index)) data[index] = 1.0;
-        else data[vocab["<UNK>"]] = 1.0;
-        return new Tensor(data, new[] { vocabSize });
-    }
 
     public void Dispose() => _storage?.Dispose();
 }

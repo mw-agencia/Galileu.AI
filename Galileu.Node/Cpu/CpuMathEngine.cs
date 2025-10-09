@@ -290,6 +290,25 @@ public class CpuMathEngine : IMathEngine
             embeddingGradData[offset + i] += gradData[i];
         }
     }
+    
+    public void SoftmaxCrossEntropyGradient(IMathTensor predictions, int[] targetIndices, IMathTensor result)
+    {
+        var predData = ((CpuTensor)predictions).GetData();
+        var resultData = ((CpuTensor)result).GetData();
+        int sequenceLength = predictions.Shape[0];
+        int vocabSize = predictions.Shape[1];
+
+        // Passo 1: Copia as predições para o tensor de resultado (dy = p)
+        Array.Copy(predData, resultData, predData.Length);
+
+        // Passo 2: Subtrai 1 na posição do índice correto para cada item da sequência (dy = p - y)
+        for (int t = 0; t < sequenceLength; t++)
+        {
+            int targetIndex = targetIndices[t];
+            int flatIndex = t * vocabSize + targetIndex;
+            resultData[flatIndex] -= 1.0;
+        }
+    }
 
     #endregion
 

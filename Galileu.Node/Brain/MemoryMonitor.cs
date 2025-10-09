@@ -93,9 +93,6 @@ public class MemoryMonitor : IDisposable
         if (currentMemoryMB > _peakMemoryMB)
             _peakMemoryMB = currentMemoryMB;
         
-        // Log normal
-        //Console.WriteLine($"[MemoryMonitor] RAM: {currentMemoryMB}MB | Pico: {_peakMemoryMB}MB | Uptime: {GetUptime()}");
-        
         // Verifica thresholds
         if (currentMemoryMB >= EMERGENCY_THRESHOLD_MB)
         {

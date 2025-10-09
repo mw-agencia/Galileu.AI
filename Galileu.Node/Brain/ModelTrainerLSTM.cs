@@ -2,23 +2,16 @@ using System;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
-using System.Threading;
-using Galileu.Node.Core;
 using Galileu.Node.Services;
 
 namespace Galileu.Node.Brain;
-
-/// <summary>
-/// Orquestra o processo de treinamento de um modelo GenerativeNeuralNetworkLSTM.
-/// OTIMIZADO: Gerenciamento agressivo de memória para treinamentos de longo prazo (100+ épocas).
-/// </summary>
 public class ModelTrainerLSTM
 {
     public readonly GenerativeNeuralNetworkLSTM model;
     private readonly Stopwatch _stopwatch = new Stopwatch();
     private GpuLoadMonitor? _gpuMonitor;
+    string logPath = Path.Combine(Environment.CurrentDirectory, "Dayson", "training_log.txt");
     
-    // === NOVO: Monitoramento de memória ===
     private readonly Process _currentProcess;
     private long _peakMemoryUsageMB = 0;
 
@@ -40,144 +33,116 @@ public class ModelTrainerLSTM
         if (!File.Exists(datasetPath))
             throw new FileNotFoundException("Arquivo de dataset não encontrado.", datasetPath);
 
-        string datasetText = File.ReadAllText(datasetPath);
-        if (string.IsNullOrWhiteSpace(datasetText))
-            throw new InvalidOperationException("O arquivo de dataset está vazio.");
-
         var swapFilePath = Path.Combine(Environment.CurrentDirectory, "Dayson", "memory.bin");
         Console.WriteLine($"[Trainer] Dataset service: {swapFilePath}");
 
         using (var datasetService = new DatasetService(swapFilePath))
         {
-            datasetService.InitializeAndSplit(datasetText, contextWindowSize,
-                model.VocabularyManager.Vocab, "<PAD>", batchSize, validationSplit);
-
-            if (_gpuMonitor != null)
-            {
-                datasetService.SetBatchSize(_gpuMonitor.CurrentBatchSize);
-            }
+            // --- CORREÇÃO: Passa o batchSize dinâmico para o serviço saber o total de lotes ---
+            int currentBatchSize = _gpuMonitor?.CurrentBatchSize ?? batchSize;
+            datasetService.InitializeAndSplit(datasetPath, contextWindowSize,
+                model.VocabularyManager.Vocab, currentBatchSize, validationSplit);
 
             Console.WriteLine($"\n[Trainer] Configuração:");
             Console.WriteLine($"  - Épocas: {epochs}");
             Console.WriteLine($"  - Learning Rate: {learningRate}");
-            Console.WriteLine($"  - Batch Size: {_gpuMonitor?.CurrentBatchSize ?? batchSize} (adaptativo se GPU)");
+            Console.WriteLine($"  - Batch Size Inicial: {currentBatchSize} (adaptativo se GPU)");
             Console.WriteLine($"  - Validação Split: {validationSplit:P0}");
-            Console.WriteLine($"  - META: RAM < 10GB constante\n");
+            Console.WriteLine($"  - META: RAM < 2GB constante\n");
+
+            const int PATIENCE = 5;
+            double bestValidationLoss = double.PositiveInfinity;
+            int epochsWithoutImprovement = 0;
+            string bestModelCheckpointPath = Path.Combine(Environment.CurrentDirectory, "Dayson", "best_model.json");
 
             TimeSpan totalElapsedTime = TimeSpan.Zero;
 
             for (int epoch = 0; epoch < epochs; epoch++)
             {
+                _peakMemoryUsageMB = 0;
                 _stopwatch.Restart();
-                Console.WriteLine($"\n{'═',60}");
+                Console.WriteLine($"\n{'═',80}");
                 Console.WriteLine($"ÉPOCA {epoch + 1}/{epochs} >> {DateTime.UtcNow}");
-                Console.WriteLine($"{'═',60}");
+                Console.WriteLine($"{'═',80}");
 
+                // --- TREINAMENTO DA ÉPOCA ---
+                datasetService.ResetTrain(); // Garante o reset do índice de treino
+                int totalTrainBatches = datasetService.GetTotalTrainBatches();
+                Console.WriteLine($"[Treino] Iniciando treino com {totalTrainBatches} lotes...");
+                
                 double totalEpochLoss = 0;
                 int batchCount = 0;
-                datasetService.ResetTrain();
-                var batchStopwatch = Stopwatch.StartNew();
-
+                
                 while (true)
                 {
                     var batch = datasetService.GetNextTrainChunk();
                     if (batch == null || batch.Count == 0) break;
 
+                    batchCount++;
+                    Console.Write($"\rÉpoca: {epoch + 1}/{epochs} | Lotes Processados: {batchCount} ...");
                     var sequenceInputIndices = batch.Select(p => p.InputIndex).ToArray();
-                    var sequenceTargets = batch.Select(p => p.Target).ToArray();
+                    var sequenceTargetIndices = batch.Select(p => p.TargetIndex).ToArray();
 
                     model.ResetHiddenState();
+                    totalEpochLoss += model.TrainSequence(sequenceInputIndices, sequenceTargetIndices, learningRate);
 
-                    batchStopwatch.Restart();
-                    totalEpochLoss += model.TrainSequence(sequenceInputIndices, sequenceTargets, learningRate);
-                    batchStopwatch.Stop();
-
-                    batchCount++;
-                    Console.Write($"\rÉpoca: {epoch + 1}/{epochs} | Lotes: {batchCount} ...");
-
-                    // === NOVO: Monitoramento de memória a cada 10 batches ===
-                    if (batchCount % 10 == 0)
+                    if (batchCount % 10 == 0 || batchCount == totalTrainBatches)
                     {
-                        double avgLossSoFar = totalEpochLoss / batchCount;
-                        long currentMemoryMB = GetCurrentMemoryUsageMB();
+                        _currentProcess.Refresh();
+                        long ram = _currentProcess.WorkingSet64 / (1024 * 1024);
+                        if (ram > _peakMemoryUsageMB) _peakMemoryUsageMB = ram;
                         
-                        if (currentMemoryMB > _peakMemoryUsageMB)
-                            _peakMemoryUsageMB = currentMemoryMB;
-                        
-                        Console.WriteLine($" | Perda: {avgLossSoFar:F4} | RAM: {currentMemoryMB}MB");
-                        
-                        // ALERTA se RAM > 9GB
-                        if (currentMemoryMB > 9000)
-                        {
-                            Console.ForegroundColor = ConsoleColor.Yellow;
-                            Console.WriteLine($"[AVISO] RAM próxima do limite: {currentMemoryMB}MB / 10GB");
-                            Console.ResetColor();
-                        }
-                    }
-                    
-                    if (batchCount % 50 == 0)
-                    {
-                        //Console.WriteLine("\n[Trainer] Executando limpeza de memória...");
-                        
-                        // Limpa TensorPool
-                        if (model._tensorPool != null)
-                        {
-                            model._tensorPool.PrintStats();
-                            // Trim agressivo se RAM > 8GB
-                            if (GetCurrentMemoryUsageMB() > 8000)
-                            {
-                                Console.WriteLine("[Trainer] RAM alta detectada - Trim forçado");
-                                model._tensorPool.Trim();
-                            }
-                        }
-                        
-                        // Força GC a cada 50 batches
-                        ForceGarbageCollection();
+                        double avgLoss = totalEpochLoss / batchCount;
                     }
 
-                    // GPU monitoring (original)
-                    if (_gpuMonitor != null && batchCount % 5 == 0)
+                    if (_gpuMonitor != null)
                     {
-                        double gpuUtil = GpuLoadMonitor.MeasureGpuUtilization();
-                        _gpuMonitor.RecordUtilization(gpuUtil, batchStopwatch.Elapsed.TotalSeconds);
-                        _gpuMonitor.ApplyThrottle();
                         datasetService.SetBatchSize(_gpuMonitor.CurrentBatchSize);
                     }
                 }
 
                 _stopwatch.Stop();
                 totalElapsedTime += _stopwatch.Elapsed;
-                double avgLoss = batchCount > 0 ? totalEpochLoss / batchCount : double.PositiveInfinity;
+                double finalEpochLoss = batchCount > 0 ? totalEpochLoss / batchCount : 0;
                 
-                Console.WriteLine($"\n[Época {epoch + 1}] Treino concluído em {_stopwatch.Elapsed:hh\\:mm\\:ss}");
-                Console.WriteLine($"  Perda Média: {avgLoss:F4}");
-                Console.WriteLine($"  RAM Atual: {GetCurrentMemoryUsageMB()}MB");
-                Console.WriteLine($"  RAM Pico: {_peakMemoryUsageMB}MB");
+                var logMessage = $"Época {epoch + 1}/{epochs} concluída. Perda média: {finalEpochLoss:F4}";
+                Console.WriteLine(logMessage);
+                File.AppendAllText(logPath, logMessage + Environment.NewLine);
 
-                // === NOVO: Limpeza completa entre épocas ===
-                Console.WriteLine("\n[Trainer] Limpeza entre épocas...");
-                CleanupBetweenEpochs();
+                // --- VALIDAÇÃO DA ÉPOCA ---
+                double validationLoss = ValidateModel(datasetService);
+                var validate = $"[Época {epoch + 1}] Perda Final (Validação): {validationLoss:F4}";
+                Console.WriteLine(validate);
+                File.AppendAllText(logPath, validate + Environment.NewLine);
+                bestModelCheckpointPath = Path.Combine(Environment.CurrentDirectory, "Dayson", $"Dayson_{epoch + 1}.json");
+                model.SaveModel(bestModelCheckpointPath);
 
-                // Validação a cada 5 épocas
-                if ((epoch + 1) % 5 == 0 || epoch == epochs - 1)
+                if (validationLoss < bestValidationLoss)
                 {
-                    double validationLoss = ValidateModel(datasetService);
-                    Console.WriteLine($"[Época {epoch + 1}] Perda Média de Validação: {validationLoss:F4}");
-                    
-                    // === NOVO: Salva checkpoint a cada 10 épocas ===
-                    if ((epoch + 1) % 10 == 0)
-                    {
-                        string checkpointPath = Path.Combine(
-                            Environment.CurrentDirectory, 
-                            "Dayson", 
-                            $"checkpoint_epoch_{epoch + 1}.json"
-                        );
-                        Console.WriteLine($"[Checkpoint] Salvando em {checkpointPath}...");
-                        model.SaveModel(checkpointPath);
-                    }
+                    Console.ForegroundColor = ConsoleColor.Green;
+                    Console.WriteLine($"  Melhora na validação! ({bestValidationLoss:F4} -> {validationLoss:F4}). Salvando melhor modelo...");
+                    Console.ResetColor();
+                    bestValidationLoss = validationLoss;
+                    model.SaveModel(bestModelCheckpointPath);
+                    epochsWithoutImprovement = 0;
+                }
+                else
+                {
+                    epochsWithoutImprovement++;
+                    Console.ForegroundColor = ConsoleColor.Yellow;
+                    Console.WriteLine($"  Sem melhora na validação por {epochsWithoutImprovement} época(s). Melhor perda: {bestValidationLoss:F4}");
+                    Console.ResetColor();
+                }
+
+                if (epochsWithoutImprovement >= PATIENCE)
+                {
+                    Console.ForegroundColor = ConsoleColor.Red;
+                    Console.WriteLine($"\n[Early Stopping] Parando o treinamento. A validação não melhora há {PATIENCE} épocas.");
+                    Console.WriteLine($"O melhor modelo foi salvo em: {bestModelCheckpointPath}");
+                    Console.ResetColor();
+                    return;
                 }
                 
-                // Estimativa de tempo restante
                 if (epoch < epochs - 1)
                 {
                     var avgEpochTime = TimeSpan.FromMilliseconds(totalElapsedTime.TotalMilliseconds / (epoch + 1));
@@ -185,82 +150,19 @@ public class ModelTrainerLSTM
                     Console.WriteLine($"[Estimativa] Tempo restante: ~{estimatedTimeRemaining:hh\\:mm\\:ss}");
                 }
             }
-            
-            // === NOVO: Relatório final de memória ===
-            Console.WriteLine("\n" + new string('═', 60));
-            Console.WriteLine("TREINAMENTO CONCLUÍDO");
-            Console.WriteLine(new string('═', 60));
-            Console.WriteLine($"RAM Pico durante treinamento: {_peakMemoryUsageMB}MB");
-            Console.WriteLine($"RAM Final: {GetCurrentMemoryUsageMB()}MB");
-            
-            if (_peakMemoryUsageMB > 10000)
-            {
-                Console.ForegroundColor = ConsoleColor.Red;
-                Console.WriteLine($"[ALERTA] Pico de RAM excedeu 10GB: {_peakMemoryUsageMB}MB");
-                Console.ResetColor();
-            }
-            else
-            {
-                Console.ForegroundColor = ConsoleColor.Green;
-                Console.WriteLine($"[SUCESSO] RAM mantida abaixo de 10GB");
-                Console.ResetColor();
-            }
+            bestModelCheckpointPath = Path.Combine(Environment.CurrentDirectory, "Dayson", "dayson_model.json");
+            model.SaveModel(bestModelCheckpointPath);
         }
-    }
-
-    /// <summary>
-    /// NOVO: Limpeza agressiva de memória entre épocas.
-    /// </summary>
-    private void CleanupBetweenEpochs()
-    {
-        long memoryBefore = GetCurrentMemoryUsageMB();
-        
-        // 1. Limpa TensorPool completamente
-        if (model._tensorPool != null)
-        {
-            Console.WriteLine("  [Cleanup] TensorPool.Trim()");
-            model._tensorPool.Trim();
-        }
-        
-        // 2. Reseta hidden states
-        Console.WriteLine("  [Cleanup] ResetHiddenState()");
-        model.ResetHiddenState();
-        
-        // 3. Força coleta de lixo completa (Gen 2)
-        Console.WriteLine("  [Cleanup] GC.Collect(Gen 2)");
-        ForceGarbageCollection();
-        
-        long memoryAfter = GetCurrentMemoryUsageMB();
-        long freed = memoryBefore - memoryAfter;
-        
-        Console.WriteLine($"  [Cleanup] Liberado: {freed}MB (Antes: {memoryBefore}MB → Depois: {memoryAfter}MB)");
-    }
-
-    /// <summary>
-    /// NOVO: Força coleta de lixo agressiva.
-    /// </summary>
-    private void ForceGarbageCollection()
-    {
-        GC.Collect(2, GCCollectionMode.Forced, true, true);
-        GC.WaitForPendingFinalizers();
-        GC.Collect(2, GCCollectionMode.Forced, true, true);
-    }
-
-    /// <summary>
-    /// NOVO: Obtém uso atual de RAM do processo.
-    /// </summary>
-    private long GetCurrentMemoryUsageMB()
-    {
-        _currentProcess.Refresh();
-        return _currentProcess.WorkingSet64 / (1024 * 1024);
     }
 
     private double ValidateModel(DatasetService datasetService)
     {
-        Console.WriteLine("\n[Validação] Iniciando validação do modelo...");
+        datasetService.ResetValidation(); // Garante o reset do índice de validação
+        int totalValidationBatches = datasetService.GetTotalValidationBatches();
+        Console.WriteLine($"\n[Validação] Iniciando com {totalValidationBatches} lotes...");
+        
         double totalLoss = 0;
         int batchCount = 0;
-        datasetService.ResetValidation();
         Stopwatch validationStopwatch = Stopwatch.StartNew();
 
         while (true)
@@ -268,23 +170,15 @@ public class ModelTrainerLSTM
             var batch = datasetService.GetNextValidationChunk();
             if (batch == null || batch.Count == 0) break;
 
-            var sequenceInputIndices = batch.Select(p => p.InputIndex).ToArray();
-            var sequenceTargets = batch.Select(p => p.Target).ToArray();
-
-            totalLoss += model.CalculateSequenceLoss(sequenceInputIndices, sequenceTargets);
             batchCount++;
-        
-            Console.Write($"\r[Validação] Processando lote {batchCount}...");
-            
-            // === NOVO: Limpeza durante validação para evitar acúmulo ===
-            if (batchCount % 20 == 0)
-            {
-                ForceGarbageCollection();
-            }
+            var sequenceInputIndices = batch.Select(p => p.InputIndex).ToArray();
+            var sequenceTargetIndices = batch.Select(p => p.TargetIndex).ToArray();
+
+            totalLoss += model.CalculateSequenceLoss(sequenceInputIndices, sequenceTargetIndices);
         }
 
         validationStopwatch.Stop();
-        Console.WriteLine($"\r[Validação] Concluída em {validationStopwatch.Elapsed:mm\\:ss} | RAM: {GetCurrentMemoryUsageMB()}MB");
+        Console.WriteLine($"[Validação] Concluída em {validationStopwatch.Elapsed:mm\\:ss}.");
     
         return batchCount > 0 ? totalLoss / batchCount : double.PositiveInfinity;
     }
