@@ -46,7 +46,7 @@ public class GenerativeService
             const int VOCAB_SIZE = 20000;
             const int EMBEDDING_SIZE = 128;  // Mantido para qualidade
             const int HIDDEN_SIZE = 256;     // Mantido para capacidade
-            const int CONTEXT_WINDOW = 1;    // Simplificado para economizar memória
+            const int CONTEXT_WINDOW = 5;    // Simplificado para economizar memória
 
             Console.WriteLine($"[GenerativeService] Arquitetura: Vocab={VOCAB_SIZE}, Emb={EMBEDDING_SIZE}, Hidden={HIDDEN_SIZE}");
             

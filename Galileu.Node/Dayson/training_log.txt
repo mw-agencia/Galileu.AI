@@ -1,1 +1,44 @@
+[Config] Vocabulário: 20000 tokens
+[Config] Hidden Size: 256
+[Config] Embedding Size: 128
+[Config] Épocas: 100
+[Config] Learning Rate: 0.0001
+[Config] Batch Size: 24 (otimizado para memória)
+[Config] Validação: 20%
+[Config] META: RAM < 10GB durante 20 dias
 
+========================================
+INICIANDO TREINAMENTO
+Duração estimada: 20 dias
+Monitoramento de memória: ATIVO
+========================================
+
+[GenerativeService] Arquitetura: Vocab=20000, Emb=128, Hidden=256
+[DiskTensorPool] Criando pool em disco: /home/administrator/models/Galileu.Node/Dayson/TensorPool/tensor_pool_c0e6cf65-5a47-4c9f-9f66-d1a04600641a.bin
+[DiskTensorPool] Tamanho máximo: 20GB
+[DiskTensorPool] Pool em disco pronto. RAM usada: ~10MB
+[ParamManager] Parâmetros do modelo alocados em disco: /home/administrator/models/Galileu.Node/Dayson/Params/params_6c1d47cc-7896-4530-b7f6-75e07091b091.bin
+[VocabularyManager]: Construindo vocabulário encontrado: /home/administrator/models/Galileu.Node/Dayson/vocab.txt
+[VocabularyManager] Vocabulário carregado: 20000 tokens
+[GenerativeService] Memória estimada do modelo: ~185MB
+[GenerativeService] Memória disponível para cache/pool: ~7815MB
+
+[GenerativeService] Iniciando treinamento com otimizações de memória...
+[Trainer] Monitor de GPU ativado para controle adaptativo de carga.
+[Trainer] Dataset service: /home/administrator/models/Galileu.Node/Dayson/memory.bin
+[DatasetService] Amostras válidas armazenadas: 559671
+[DatasetService] Armazenamento concluído. 559671 amostras totais.
+[DatasetService] Offsets divididos: 18655 lotes de treino, 4663 lotes de validação.
+
+[Trainer] Configuração:
+  - Épocas: 100
+  - Learning Rate: 0.0001
+  - Batch Size Inicial: 24 (adaptativo se GPU)
+  - Validação Split: 20%
+  - META: RAM < 2GB constante
+
+
+                                                                               ═
+ÉPOCA 1/100 >> 10/10/2025 5:05:52AM
+                                                                               ═
+[Treino] treino com 18656 lotes...

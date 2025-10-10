@@ -11,10 +11,14 @@ namespace Galileu.Node.Brain;
 /// <summary>
 /// Implementação "Totalmente Out-of-Core" de uma rede neural LSTM.
 /// Esta classe não armazena pesos ou buffers em RAM. Tudo é gerenciado em disco.
+/// - Usa ModelParameterManager para pesos e estados do Adam.
+/// - Usa StreamingLstmCacheManager para ativações (forward pass cache).
+/// - Usa DiskTensorPool para todos os tensores de cálculo temporários.
+/// O consumo de RAM é mínimo e constante, limitado aos tensores ativamente em uso.
 /// </summary>
-public class NeuralNetworkLSTM : IDisposable
+public class Neural : IDisposable
 {
-    public readonly ModelParameterManager _paramManager;
+    private readonly ModelParameterManager _paramManager;
     private StreamingLstmCacheManager? _cacheManager;
     private readonly Dictionary<string, IMathTensor> _reusableGradients;
 
@@ -37,7 +41,7 @@ public class NeuralNetworkLSTM : IDisposable
 
     public IMathEngine GetMathEngine() => _mathEngine;
 
-    public NeuralNetworkLSTM(int vocabSize, int embeddingSize, int hiddenSize, int outputSize, IMathEngine mathEngine)
+    public Neural(int vocabSize, int embeddingSize, int hiddenSize, int outputSize, IMathEngine mathEngine)
     {
         this.inputSize = vocabSize;
         this.hiddenSize = hiddenSize;
@@ -66,7 +70,7 @@ public class NeuralNetworkLSTM : IDisposable
         _reusableGradients = InitializeGradients(shapes);
     }
     
-    protected NeuralNetworkLSTM(string modelConfigPath, IMathEngine mathEngine)
+    protected Neural(string modelConfigPath, IMathEngine mathEngine)
     {
         string jsonString = File.ReadAllText(modelConfigPath);
         var modelData = JsonSerializer.Deserialize<NeuralNetworkModelDataEmbeddingLSTM>(jsonString)!;
@@ -199,6 +203,7 @@ public class NeuralNetworkLSTM : IDisposable
         hiddenState.Dispose();
         hiddenState = nextHiddenState;
 
+        // Liberar tensores intermediários
         forgetGate.Dispose();
         inputGate.Dispose();
         cellCandidate.Dispose();
@@ -532,6 +537,7 @@ public class NeuralNetworkLSTM : IDisposable
         }
         finally
         {
+            // O bloco 'using' no início do método garante o descarte automático de todos os proxies.
         }
     }
 
@@ -587,14 +593,14 @@ public class NeuralNetworkLSTM : IDisposable
         File.WriteAllText(filePath, jsonString);
     }
 
-    public static NeuralNetworkLSTM? LoadModel(string modelConfigPath, IMathEngine mathEngine)
+    public static Neural? LoadModel(string modelConfigPath, IMathEngine mathEngine)
     {
         if (!File.Exists(modelConfigPath)) return null;
 
         string weightsPath = Path.ChangeExtension(modelConfigPath, ".bin");
         if (!File.Exists(weightsPath)) return null;
 
-        return new NeuralNetworkLSTM(modelConfigPath, mathEngine);
+        return new Neural(modelConfigPath, mathEngine);
     }
 
     public double CalculateSequenceLoss(int[] inputIndices, int[] targetIndices)

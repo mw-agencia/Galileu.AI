@@ -32,4 +32,5 @@ public interface IMathEngine : IDisposable
     void Lookup(IMathTensor embeddingMatrix, int index, IMathTensor result);
     void AccumulateGradient(IMathTensor embeddingGradients, IMathTensor gradient, int index);
     void SoftmaxCrossEntropyGradient(IMathTensor predictions, int[] targetIndices, IMathTensor result);
+    void Copy(IMathTensor source, IMathTensor destination);
 }

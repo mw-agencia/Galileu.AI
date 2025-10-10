@@ -215,15 +215,6 @@ public class GpuMathEngine : IMathEngine
         return newTensor;
     }
 
-    public void Copy(IMathTensor source, IMathTensor destination)
-    {
-        var gpuSource = (GpuTensor)source;
-        var gpuDestination = (GpuTensor)destination;
-        SetKernelArg(_cloneKernel, 0, gpuSource.Buffer);
-        SetKernelArg(_cloneKernel, 1, gpuDestination.Buffer);
-        EnqueueNDRangeKernel(_commandQueue, _cloneKernel, 1, null, new[] { (IntPtr)gpuSource.Length }, null, 0, null, out _);
-    }
-
     public void Transpose(IMathTensor input, IMathTensor result)
     {
         var tensorIn = (GpuTensor)input;
@@ -400,6 +391,19 @@ public class GpuMathEngine : IMathEngine
         {
             ReleaseMemObject(targetsGpuBuffer);
         }
+    }
+    public void Copy(IMathTensor source, IMathTensor destination)
+    {
+        if (source.Length != destination.Length)
+            throw new ArgumentException("Os tensores de origem e destino devem ter o mesmo tamanho para a cópia.");
+
+        var gpuSource = (GpuTensor)source;
+        var gpuDestination = (GpuTensor)destination;
+        
+        SetKernelArg(_cloneKernel, 0, gpuSource.Buffer);
+        SetKernelArg(_cloneKernel, 1, gpuDestination.Buffer);
+        
+        EnqueueNDRangeKernel(_commandQueue, _cloneKernel, 1, null, new[] { (IntPtr)gpuSource.Length }, null, 0, null, out _);
     }
 
     public void Dispose()

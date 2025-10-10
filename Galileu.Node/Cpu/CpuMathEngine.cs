@@ -309,6 +309,17 @@ public class CpuMathEngine : IMathEngine
             resultData[flatIndex] -= 1.0;
         }
     }
+    
+    // --- IMPLEMENTAÇÃO DO NOVO MÉTODO ---
+    public void Copy(IMathTensor source, IMathTensor destination)
+    {
+        if (source.Length != destination.Length)
+            throw new ArgumentException("Os tensores de origem e destino devem ter o mesmo tamanho para a cópia.");
+
+        var srcData = ((CpuTensor)source).GetData();
+        var destData = ((CpuTensor)destination).GetData();
+        Array.Copy(srcData, destData, srcData.Length);
+    }
 
     #endregion
 

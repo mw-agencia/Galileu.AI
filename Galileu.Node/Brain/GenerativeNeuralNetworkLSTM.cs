@@ -7,9 +7,8 @@ using Galileu.Node.Interfaces;
 namespace Galileu.Node.Brain;
 
 /// <summary>
-/// Estende a rede LSTM base com a capacidade de gerar texto.
-/// Esta versão é otimizada para trabalhar com a arquitetura de Embedding,
-/// gerenciando vocabulário, tokenização e a conversão de tokens em vetores de embedding.
+/// Estende a rede neural base com a capacidade de gerar texto.
+/// Compatível com a arquitetura "Totalmente Out-of-Core".
 /// </summary>
 public class GenerativeNeuralNetworkLSTM : NeuralNetworkLSTM
 {
@@ -22,14 +21,12 @@ public class GenerativeNeuralNetworkLSTM : NeuralNetworkLSTM
     /// </summary>
     public GenerativeNeuralNetworkLSTM(int vocabSize, int embeddingSize, int hiddenSize, string datasetPath,
         ISearchService? searchService, IMathEngine mathEngine)
-        // Chama o construtor da classe base com os novos parâmetros arquiteturais
         : base(vocabSize, embeddingSize, hiddenSize, vocabSize, mathEngine) 
     {
         this.vocabularyManager = new VocabularyManager();
         this.searchService = searchService ?? new MockSearchService();
         this._embeddingSize = embeddingSize;
 
-        // Constrói o vocabulário a partir do dataset, garantindo que o tamanho corresponde ao esperado
         int loadedVocabSize = vocabularyManager.BuildVocabulary(datasetPath, maxVocabSize: vocabSize);
         if (loadedVocabSize == 0)
         {
@@ -42,31 +39,21 @@ public class GenerativeNeuralNetworkLSTM : NeuralNetworkLSTM
     }
 
     /// <summary>
-    /// Novo construtor para "envolver" um modelo base (NeuralNetworkLSTM) que já foi carregado do disco.
-    /// Este é o construtor que o ModelSerializer/GenerativeService usará após o carregamento.
+    /// Construtor para carregar um modelo generativo existente.
     /// </summary>
-    public GenerativeNeuralNetworkLSTM(NeuralNetworkLSTM baseModel, VocabularyManager vocabManager, ISearchService? searchService)
-        // Chama o construtor protegido da classe base para transferir eficientemente
-        // todos os pesos e a configuração que já foram carregados.
-        : base(
-              baseModel.InputSize,                                  // vocabSize
-              baseModel.weightsEmbedding!.Shape[1],                 // embeddingSize (derivado do tensor carregado)
-              baseModel.HiddenSize,                                 // hiddenSize
-              baseModel.OutputSize,                                 // outputSize
-              baseModel.GetMathEngine(),                            // Passa a engine que ele já está usando
-              // Passa todos os tensores de peso já carregados
-              baseModel.weightsEmbedding!, baseModel.weightsInputForget!, baseModel.weightsHiddenForget!,
-              baseModel.weightsInputInput!, baseModel.weightsHiddenInput!,
-              baseModel.weightsInputCell!, baseModel.weightsHiddenCell!,
-              baseModel.weightsInputOutput!, baseModel.weightsHiddenOutput!,
-              baseModel.biasForget!, baseModel.biasInput!,
-              baseModel.biasCell!, baseModel.biasOutput!,
-              baseModel.weightsHiddenOutputFinal!, baseModel.biasOutputFinal!
-          )
+    public GenerativeNeuralNetworkLSTM(string modelConfigPath, VocabularyManager vocabManager, ISearchService? searchService, IMathEngine mathEngine)
+        : base(modelConfigPath, mathEngine)
     {
         this.vocabularyManager = vocabManager ?? throw new ArgumentNullException(nameof(vocabManager));
         this.searchService = searchService ?? new MockSearchService();
-        this._embeddingSize = baseModel.weightsEmbedding!.Shape[1];
+        this._embeddingSize = this.GetEmbeddingSizeFromModel();
+    }
+
+    private int GetEmbeddingSizeFromModel()
+    {
+        // Usa o _paramManager herdado para obter o peso e descobrir sua forma.
+        using var w_embed = _paramManager.GetParameter("w_embed");
+        return w_embed.Shape[1];
     }
 
     /// <summary>
@@ -78,38 +65,44 @@ public class GenerativeNeuralNetworkLSTM : NeuralNetworkLSTM
 
         ResetHiddenState();
         var tokens = Tokenize(inputText);
-        using var embeddingVector = _tensorPool!.Rent(new[] { 1, _embeddingSize });
+        
+        using var embeddingVectorProxy = _tensorPool!.Rent(new[] { 1, _embeddingSize });
+        embeddingVectorProxy.MarkDirty();
 
-        // Aquece o estado da rede com o prompt, exceto o último token
+        // Aquece o estado da rede com o prompt
         foreach (var token in tokens.Take(tokens.Length - 1))
         {
             int tokenIndex = GetTokenIndex(token);
-            // Executa o lookup para obter o vetor de embedding
-            GetMathEngine().Lookup(weightsEmbedding!, tokenIndex, embeddingVector);
-            // Passa o vetor denso para o forward pass
-            Forward(new Tensor(embeddingVector.ToCpuTensor().GetData(), new[] { _embeddingSize }));
+            
+            // Usa o _paramManager herdado para carregar o peso de embedding sob demanda.
+            using(var w_embed = _paramManager.GetParameter("w_embed"))
+            {
+                GetMathEngine().Lookup(w_embed, tokenIndex, embeddingVectorProxy.GetTensor());
+            }
+
+            Forward(new Tensor(embeddingVectorProxy.GetTensor().ToCpuTensor().GetData(), new[] { _embeddingSize }));
         }
 
         var responseTokens = new List<string>();
         string lastToken = tokens.LastOrDefault() ?? "<UNK>";
 
-        // Loop de geração de novos tokens
+        // Loop de geração
         for (int i = 0; i < maxLength; i++)
         {
             int lastTokenIndex = GetTokenIndex(lastToken);
-            // Obtém o embedding para o último token
-            GetMathEngine().Lookup(weightsEmbedding!, lastTokenIndex, embeddingVector);
             
-            // Executa o forward pass com o vetor de embedding
-            var output = Forward(new Tensor(embeddingVector.ToCpuTensor().GetData(), new[] { _embeddingSize })); 
+            using(var w_embed = _paramManager.GetParameter("w_embed"))
+            {
+                GetMathEngine().Lookup(w_embed, lastTokenIndex, embeddingVectorProxy.GetTensor());
+            }
+            
+            var output = Forward(new Tensor(embeddingVectorProxy.GetTensor().ToCpuTensor().GetData(), new[] { _embeddingSize })); 
 
-            // Amostra o próximo token a partir da distribuição de probabilidade de saída
             int predictedTokenIndex = SampleToken(output);
             string predictedToken = vocabularyManager.ReverseVocab.ContainsKey(predictedTokenIndex)
                 ? vocabularyManager.ReverseVocab[predictedTokenIndex]
                 : "<UNK>";
 
-            // Condição de parada
             if (predictedToken == "." || predictedToken == "!" || predictedToken == "?")
             {
                 responseTokens.Add(predictedToken);
@@ -120,18 +113,10 @@ public class GenerativeNeuralNetworkLSTM : NeuralNetworkLSTM
             lastToken = predictedToken;
         }
         
-        // Limpa o tensor reutilizado
-        _tensorPool.Return(embeddingVector);
-
         string response = string.Join(" ", responseTokens).Trim();
         return response.Length > 0 ? response.Capitalize() : "Não foi possível gerar uma resposta.";
     }
     
-    // --- Métodos Utilitários ---
-
-    /// <summary>
-    /// Obtém o índice de um token do vocabulário, com fallback para "<UNK>".
-    /// </summary>
     private int GetTokenIndex(string token)
     {
         return vocabularyManager.Vocab.TryGetValue(token, out int tokenIndex) 
@@ -139,30 +124,23 @@ public class GenerativeNeuralNetworkLSTM : NeuralNetworkLSTM
             : vocabularyManager.Vocab["<UNK>"];
     }
 
-    /// <summary>
-    /// Tokenização simples baseada em espaços.
-    /// </summary>
     private string[] Tokenize(string text)
     {
-        // Nota: A tokenização com Regex do VocabularyManager é mais robusta para a construção do vocabulário.
-        // Esta é suficiente para a inferência em tempo real.
         return text.ToLower().Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
     }
     
-    /// <summary>
-    /// Amostra um índice de token da distribuição de probabilidade de saída do modelo.
-    /// </summary>
     private int SampleToken(Tensor output)
     {
         double[] probs = output.GetData();
-        double r = new Random().NextDouble();
+        var rand = new Random();
+        double r = rand.NextDouble();
         double cumulative = 0;
         for (int i = 0; i < probs.Length; i++)
         {
             cumulative += probs[i];
             if (r <= cumulative) return i;
         }
-        return probs.Length - 1; // Fallback para o último token
+        return probs.Length - 1;
     }
 
     internal VocabularyManager VocabularyManager => vocabularyManager;
