@@ -17,10 +17,10 @@ public class ModelTrainerLSTM
     public readonly GenerativeNeuralNetworkLSTM model;
     private readonly Stopwatch _stopwatch = new Stopwatch();
     private GpuLoadMonitor? _gpuMonitor;
-    
     // === NOVO: Monitoramento de memória ===
     private readonly Process _currentProcess;
     private long _peakMemoryUsageMB = 0;
+    string logPath = Path.Combine(Environment.CurrentDirectory, "Dayson", "training_log.txt");
 
     public ModelTrainerLSTM(GenerativeNeuralNetworkLSTM model)
     {
@@ -94,88 +94,26 @@ public class ModelTrainerLSTM
 
                     batchCount++;
                     Console.Write($"\rÉpoca: {epoch + 1}/{epochs} | Lotes: {batchCount} ...");
-
-                    // === NOVO: Monitoramento de memória a cada 10 batches ===
-                    if (batchCount % 10 == 0)
-                    {
-                        double avgLossSoFar = totalEpochLoss / batchCount;
-                        long currentMemoryMB = GetCurrentMemoryUsageMB();
-                        
-                        if (currentMemoryMB > _peakMemoryUsageMB)
-                            _peakMemoryUsageMB = currentMemoryMB;
-                        
-                        Console.WriteLine($" | Perda: {avgLossSoFar:F4} | RAM: {currentMemoryMB}MB");
-                        
-                        // ALERTA se RAM > 9GB
-                        if (currentMemoryMB > 9000)
-                        {
-                            Console.ForegroundColor = ConsoleColor.Yellow;
-                            Console.WriteLine($"[AVISO] RAM próxima do limite: {currentMemoryMB}MB / 10GB");
-                            Console.ResetColor();
-                        }
-                    }
-                    
-                    if (batchCount % 50 == 0)
-                    {
-                        //Console.WriteLine("\n[Trainer] Executando limpeza de memória...");
-                        
-                        // Limpa TensorPool
-                        if (model._tensorPool != null)
-                        {
-                            model._tensorPool.PrintStats();
-                            // Trim agressivo se RAM > 8GB
-                            if (GetCurrentMemoryUsageMB() > 8000)
-                            {
-                                Console.WriteLine("[Trainer] RAM alta detectada - Trim forçado");
-                                model._tensorPool.Trim();
-                            }
-                        }
-                        
-                        // Força GC a cada 50 batches
-                        ForceGarbageCollection();
-                    }
-
-                    // GPU monitoring (original)
-                    if (_gpuMonitor != null && batchCount % 5 == 0)
-                    {
-                        double gpuUtil = GpuLoadMonitor.MeasureGpuUtilization();
-                        _gpuMonitor.RecordUtilization(gpuUtil, batchStopwatch.Elapsed.TotalSeconds);
-                        _gpuMonitor.ApplyThrottle();
-                        datasetService.SetBatchSize(_gpuMonitor.CurrentBatchSize);
-                    }
+                    ForceGarbageCollection();
                 }
 
                 _stopwatch.Stop();
                 totalElapsedTime += _stopwatch.Elapsed;
                 double avgLoss = batchCount > 0 ? totalEpochLoss / batchCount : double.PositiveInfinity;
-                
-                Console.WriteLine($"\n[Época {epoch + 1}] Treino concluído em {_stopwatch.Elapsed:hh\\:mm\\:ss}");
-                Console.WriteLine($"  Perda Média: {avgLoss:F4}");
+                var logMessage = $"Época {epoch + 1}/{epochs} concluída. Perda média: {avgLoss:F4} : Eponca concluída em {_stopwatch.Elapsed:hh\\\\:mm\\\\:ss}";
+                Console.WriteLine(logMessage);
+                File.AppendAllText(logPath, logMessage + Environment.NewLine);
                 Console.WriteLine($"  RAM Atual: {GetCurrentMemoryUsageMB()}MB");
                 Console.WriteLine($"  RAM Pico: {_peakMemoryUsageMB}MB");
 
                 // === NOVO: Limpeza completa entre épocas ===
                 Console.WriteLine("\n[Trainer] Limpeza entre épocas...");
                 CleanupBetweenEpochs();
-
-                // Validação a cada 5 épocas
-                if ((epoch + 1) % 5 == 0 || epoch == epochs - 1)
-                {
-                    double validationLoss = ValidateModel(datasetService);
-                    Console.WriteLine($"[Época {epoch + 1}] Perda Média de Validação: {validationLoss:F4}");
-                    
-                    // === NOVO: Salva checkpoint a cada 10 épocas ===
-                    if ((epoch + 1) % 10 == 0)
-                    {
-                        string checkpointPath = Path.Combine(
-                            Environment.CurrentDirectory, 
-                            "Dayson", 
-                            $"checkpoint_epoch_{epoch + 1}.json"
-                        );
-                        Console.WriteLine($"[Checkpoint] Salvando em {checkpointPath}...");
-                        model.SaveModel(checkpointPath);
-                    }
-                }
+                
+                double validationLoss = ValidateModel(datasetService);
+                var logvalidationLoss = $"[Época {epoch + 1}] Perda Média de Validação: {validationLoss:F4}";
+                Console.WriteLine(logMessage);
+                File.AppendAllText(logPath, logvalidationLoss + Environment.NewLine);
                 
                 // Estimativa de tempo restante
                 if (epoch < epochs - 1)
