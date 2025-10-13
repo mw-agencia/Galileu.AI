@@ -1,9 +1,4 @@
-using System;
 using System.Diagnostics;
-using System.IO;
-using System.Linq;
-using System.Threading;
-using Galileu.Node.Core;
 using Galileu.Node.Services;
 
 namespace Galileu.Node.Brain;
@@ -94,7 +89,9 @@ public class ModelTrainerLSTM
 
                     batchCount++;
                     Console.Write($"\rÉpoca: {epoch + 1}/{epochs} | Lotes: {batchCount} ...");
+                    model._tensorPool?.Trim();
                     ForceGarbageCollection();
+                    
                 }
 
                 _stopwatch.Stop();
@@ -173,20 +170,12 @@ public class ModelTrainerLSTM
         
         Console.WriteLine($"  [Cleanup] Liberado: {freed}MB (Antes: {memoryBefore}MB → Depois: {memoryAfter}MB)");
     }
-
-    /// <summary>
-    /// NOVO: Força coleta de lixo agressiva.
-    /// </summary>
     private void ForceGarbageCollection()
     {
         GC.Collect(2, GCCollectionMode.Forced, true, true);
         GC.WaitForPendingFinalizers();
         GC.Collect(2, GCCollectionMode.Forced, true, true);
     }
-
-    /// <summary>
-    /// NOVO: Obtém uso atual de RAM do processo.
-    /// </summary>
     private long GetCurrentMemoryUsageMB()
     {
         _currentProcess.Refresh();

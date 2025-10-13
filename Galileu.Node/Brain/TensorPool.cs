@@ -7,7 +7,7 @@ namespace Galileu.Node.Brain;
 /// Pool de tensores reutilizáveis com gerenciamento agressivo de memória.
 /// OTIMIZADO PARA TREINAMENTOS LONGOS (100+ épocas).
 /// </summary>
-public class TensorPool : IDisposable
+public class TensorPool : ITensorPool,IDisposable
 {
     private readonly IMathEngine _mathEngine;
     private readonly Dictionary<string, Queue<IMathTensor>> _pools;
@@ -234,6 +234,23 @@ public class TensorPool : IDisposable
     private string GetKey(int[] shape)
     {
         return string.Join("x", shape);
+    }
+    
+    public void PrintDetailedStats()
+    {
+        Console.WriteLine("\n[TensorPool] ========== ESTATÍSTICAS ==========");
+        Console.WriteLine($"Tensores em uso: {_inUse.Count}");
+        Console.WriteLine($"Pools ativos: {_pools.Count}");
+    
+        long totalPooledMB = 0;
+        foreach (var (shape, pool) in _pools)
+        {
+            if (pool.Count > 0)
+            {
+                Console.WriteLine($"  Shape {shape}: {pool.Count} tensors");
+            }
+        }
+        Console.WriteLine("===============================================\n");
     }
 
     public void Dispose()

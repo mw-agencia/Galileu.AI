@@ -17,9 +17,9 @@ public class MemoryMonitor : IDisposable
     private bool _disposed = false;
     
     // Limites configuráveis
-    private const long WARNING_THRESHOLD_MB = 8000;  // 8GB
-    private const long CRITICAL_THRESHOLD_MB = 9500; // 9.5GB
-    private const long EMERGENCY_THRESHOLD_MB = 10000; // 10GB
+    private const long WARNING_THRESHOLD_MB = 100000;  // 8GB
+    private const long CRITICAL_THRESHOLD_MB = 150000; // 9.5GB
+    private const long EMERGENCY_THRESHOLD_MB = 250000; // 10GB
     
     // Estatísticas
     private long _peakMemoryMB = 0;

@@ -131,9 +131,9 @@ public class LstmCacheManager : IDisposable
     public void Dispose()
     {
         if (_disposed) return;
-        _writer?.Close(); // Close já chama Dispose
+        _writer?.Close(); 
         _reader?.Close();
-        _fileStream?.Close(); // O FileOptions.DeleteOnClose cuidará da exclusão
+        _fileStream?.Close();
         _disposed = true;
         GC.SuppressFinalize(this);
     }

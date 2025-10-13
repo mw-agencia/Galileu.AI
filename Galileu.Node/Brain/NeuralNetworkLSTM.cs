@@ -11,8 +11,11 @@ namespace Galileu.Node.Brain;
 public class NeuralNetworkLSTM : IDisposable
 {
     private readonly AdamOptimizer _adamOptimizer;
-    private HybridLstmCacheManager? _cacheManager;
 
+    // --- CORREÇÃO 1: Usando o gerenciador de cache correto e mais eficiente ---
+    private readonly DiskOnlyCacheManager _cacheManager;
+
+    // Pesos e biases do modelo
     public IMathTensor? weightsEmbedding { get; set; }
     public IMathTensor? weightsInputForget { get; set; }
     public IMathTensor? weightsHiddenForget { get; set; }
@@ -54,7 +57,7 @@ public class NeuralNetworkLSTM : IDisposable
         this.outputSize = outputSize;
         this._mathEngine = mathEngine ?? throw new ArgumentNullException(nameof(mathEngine));
         this._adamOptimizer = new AdamOptimizer();
-        
+
         if (_mathEngine.IsGpu)
         {
             _tensorPool = new TensorPool(_mathEngine);
@@ -80,6 +83,9 @@ public class NeuralNetworkLSTM : IDisposable
         biasOutput = InitializeTensor(1, hiddenSize, rand);
         weightsHiddenOutputFinal = InitializeTensor(hiddenSize, outputSize, rand);
         biasOutputFinal = InitializeTensor(1, outputSize, rand);
+
+        // --- CORREÇÃO 1: Instanciando o gerenciador de cache correto ---
+        _cacheManager = new DiskOnlyCacheManager(_mathEngine, embeddingSize, hiddenSize);
     }
 
     protected NeuralNetworkLSTM(
@@ -118,6 +124,9 @@ public class NeuralNetworkLSTM : IDisposable
 
         hiddenState = _mathEngine.CreateTensor(new[] { 1, hiddenSize });
         cellState = _mathEngine.CreateTensor(new[] { 1, hiddenSize });
+
+        // --- CORREÇÃO 1: Instanciando o gerenciador de cache correto ---
+        _cacheManager = new DiskOnlyCacheManager(_mathEngine, embeddingSize, hiddenSize);
     }
 
     private IMathTensor InitializeTensor(int rows, int cols, Random rand)
@@ -220,22 +229,105 @@ public class NeuralNetworkLSTM : IDisposable
         return output;
     }
 
+    // ========================================
+// TRAIN SEQUENCE - FIX CRÍTICO DE GRADIENTES
+// Garante liberação de TODOS os tensores
+// ========================================
+
     public double TrainSequence(int[] inputIndices, Tensor[] targets, double learningRate)
     {
-        _cacheManager?.Dispose();
-        _cacheManager = new HybridLstmCacheManager(_mathEngine, weightsEmbedding!.Shape[1], hiddenSize, inputIndices.Length);
+        // ✅ Variáveis nullable para garantir limpeza no finally
+        IMathTensor? targetsGpu = null;
+        IMathTensor? predictions = null;
+        Dictionary<string, IMathTensor>? gradients = null;
 
-        using var targetsGpu = CreateSequenceTensor(targets);
+        try
+        {
+            // ✅ FASE 1: Reset do cache (trunca arquivo de disco)
+            _cacheManager.Reset();
 
-        var (predictions, loss) = ForwardPassGpuOptimized(inputIndices, targetsGpu, inputIndices.Length);
-        var gradients = BackwardPassGpuOptimized(targetsGpu, predictions, inputIndices, inputIndices.Length);
+            // ✅ FASE 2: Converte targets para GPU
+            targetsGpu = CreateSequenceTensor(targets);
 
-        UpdateWeightsWithAdamGpu(gradients, learningRate);
+            // ✅ FASE 3: Forward Pass
+            var (pred, loss) = ForwardPassGpuOptimized(inputIndices, targetsGpu, inputIndices.Length);
+            predictions = pred;
 
-        predictions.Dispose();
-        foreach (var grad in gradients.Values) grad.Dispose();
+            // ✅ FASE 4: Backward Pass (cria 15 tensores de gradientes)
+            gradients = BackwardPassGpuOptimized(targetsGpu, predictions, inputIndices, inputIndices.Length);
 
-        return loss;
+            // ✅ FASE 5: Update Weights (usa os gradientes)
+            UpdateWeightsWithAdamGpu(gradients, learningRate);
+
+            // ✅✅✅ FASE 6: LIBERA GRADIENTES (CRÍTICO!)
+            // Este é o vazamento que você identificou corretamente!
+            foreach (var grad in gradients.Values)
+            {
+                grad?.Dispose();
+            }
+
+            gradients.Clear();
+            gradients = null; // Marca como null para evitar double-dispose no finally
+
+            // ✅ FASE 7: Libera predictions
+            predictions?.Dispose();
+            predictions = null;
+
+            // ✅ FASE 8: Libera targets GPU
+            targetsGpu?.Dispose();
+            targetsGpu = null;
+
+            // ✅✅✅ FASE 9: LIMPEZA ULTRA-AGRESSIVA
+            // Força sincronização da GPU (evita comandos pendentes)
+            if (_mathEngine.IsGpu)
+            {
+                var gpuEngine = _mathEngine as Galileu.Node.Gpu.GpuMathEngine;
+                gpuEngine?.Synchronize();
+            }
+
+            // ✅ Trim do TensorPool após cada batch
+            _tensorPool?.Trim();
+
+            // ✅ Sugere GC leve (Gen 0 apenas, rápido)
+            GC.Collect(0, GCCollectionMode.Optimized, false);
+
+            return loss;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[ERRO] TrainSequence falhou: {ex.Message}");
+            throw;
+        }
+        finally
+        {
+            // ✅✅✅ GARANTIA FINAL: Libera TUDO mesmo se houver exceção
+
+            // Libera predictions
+            if (predictions != null)
+            {
+                predictions.Dispose();
+                predictions = null;
+            }
+
+            // Libera targets GPU
+            if (targetsGpu != null)
+            {
+                targetsGpu.Dispose();
+                targetsGpu = null;
+            }
+
+            // ✅✅✅ CRÍTICO: Libera gradientes
+            if (gradients != null)
+            {
+                foreach (var grad in gradients.Values)
+                {
+                    grad?.Dispose();
+                }
+
+                gradients.Clear();
+                gradients = null;
+            }
+        }
     }
 
     private (IMathTensor predictions, double loss) ForwardPassGpuOptimized(
@@ -259,89 +351,89 @@ public class NeuralNetworkLSTM : IDisposable
         {
             for (int t = 0; t < sequenceLength; t++)
             {
-                IMathTensor next_h, next_c;
-                
-                var stepCache = new LstmStepCache();
-                
-                stepCache.HiddenPrev = h_prev;
-                stepCache.CellPrev = c_prev;
+                IMathTensor inputEmbedding = _tensorPool.Rent(new[] { 1, embeddingSize });
+                IMathTensor forgetGate = _tensorPool.Rent(new[] { 1, hiddenSize });
+                IMathTensor inputGate = _tensorPool.Rent(new[] { 1, hiddenSize });
+                IMathTensor cellCandidate = _tensorPool.Rent(new[] { 1, hiddenSize });
+                IMathTensor outputGate = _tensorPool.Rent(new[] { 1, hiddenSize });
+                IMathTensor cellNext = _tensorPool.Rent(new[] { 1, hiddenSize });
+                IMathTensor tanhCellNext = _tensorPool.Rent(new[] { 1, hiddenSize });
+                IMathTensor hiddenNext = _tensorPool.Rent(new[] { 1, hiddenSize });
 
-                stepCache.Input = _tensorPool.Rent(new[] { 1, embeddingSize });
-                _mathEngine.Lookup(weightsEmbedding!, inputIndices[t], stepCache.Input);
+                _mathEngine.Lookup(weightsEmbedding!, inputIndices[t], inputEmbedding);
 
-                _mathEngine.MatrixMultiply(stepCache.Input, weightsInputForget!, temp1);
+                // Forget Gate
+                _mathEngine.MatrixMultiply(inputEmbedding, weightsInputForget!, temp1);
                 _mathEngine.MatrixMultiply(h_prev, weightsHiddenForget!, temp2);
                 _mathEngine.Add(temp1, temp2, linearBuffer);
                 _mathEngine.AddBroadcast(linearBuffer, biasForget!, linearBuffer);
-                stepCache.ForgetGate = _tensorPool.Rent(new[] { 1, hiddenSize });
-                _mathEngine.Sigmoid(linearBuffer, stepCache.ForgetGate);
+                _mathEngine.Sigmoid(linearBuffer, forgetGate);
 
-                _mathEngine.MatrixMultiply(stepCache.Input, weightsInputInput!, temp1);
+                // Input Gate
+                _mathEngine.MatrixMultiply(inputEmbedding, weightsInputInput!, temp1);
                 _mathEngine.MatrixMultiply(h_prev, weightsHiddenInput!, temp2);
                 _mathEngine.Add(temp1, temp2, linearBuffer);
                 _mathEngine.AddBroadcast(linearBuffer, biasInput!, linearBuffer);
-                stepCache.InputGate = _tensorPool.Rent(new[] { 1, hiddenSize });
-                _mathEngine.Sigmoid(linearBuffer, stepCache.InputGate);
+                _mathEngine.Sigmoid(linearBuffer, inputGate);
 
-                _mathEngine.MatrixMultiply(stepCache.Input, weightsInputCell!, temp1);
+                // Cell Candidate
+                _mathEngine.MatrixMultiply(inputEmbedding, weightsInputCell!, temp1);
                 _mathEngine.MatrixMultiply(h_prev, weightsHiddenCell!, temp2);
                 _mathEngine.Add(temp1, temp2, linearBuffer);
                 _mathEngine.AddBroadcast(linearBuffer, biasCell!, linearBuffer);
-                stepCache.CellCandidate = _tensorPool.Rent(new[] { 1, hiddenSize });
-                _mathEngine.Tanh(linearBuffer, stepCache.CellCandidate);
+                _mathEngine.Tanh(linearBuffer, cellCandidate);
 
-                stepCache.CellNext = _tensorPool.Rent(new[] { 1, hiddenSize });
-                _mathEngine.Multiply(stepCache.ForgetGate, c_prev, temp1);
-                _mathEngine.Multiply(stepCache.InputGate, stepCache.CellCandidate, temp2);
-                _mathEngine.Add(temp1, temp2, stepCache.CellNext);
+                // Cell State
+                _mathEngine.Multiply(forgetGate, c_prev, temp1);
+                _mathEngine.Multiply(inputGate, cellCandidate, temp2);
+                _mathEngine.Add(temp1, temp2, cellNext);
 
-                _mathEngine.MatrixMultiply(stepCache.Input, weightsInputOutput!, temp1);
+                // Output Gate
+                _mathEngine.MatrixMultiply(inputEmbedding, weightsInputOutput!, temp1);
                 _mathEngine.MatrixMultiply(h_prev, weightsHiddenOutput!, temp2);
                 _mathEngine.Add(temp1, temp2, linearBuffer);
                 _mathEngine.AddBroadcast(linearBuffer, biasOutput!, linearBuffer);
-                stepCache.OutputGate = _tensorPool.Rent(new[] { 1, hiddenSize });
-                _mathEngine.Sigmoid(linearBuffer, stepCache.OutputGate);
+                _mathEngine.Sigmoid(linearBuffer, outputGate);
 
-                stepCache.TanhCellNext = _tensorPool.Rent(new[] { 1, hiddenSize });
-                _mathEngine.Tanh(stepCache.CellNext, stepCache.TanhCellNext);
-                stepCache.HiddenNext = _tensorPool.Rent(new[] { 1, hiddenSize });
-                _mathEngine.Multiply(stepCache.OutputGate, stepCache.TanhCellNext, stepCache.HiddenNext);
+                // Hidden State
+                _mathEngine.Tanh(cellNext, tanhCellNext);
+                _mathEngine.Multiply(outputGate, tanhCellNext, hiddenNext);
 
-                _cacheManager!.CacheStep(stepCache, t);
+                IMathTensor cloneHiddenPrev = _mathEngine.Clone(h_prev);
+                IMathTensor cloneCellPrev = _mathEngine.Clone(c_prev);
 
-                next_h = _mathEngine.Clone(stepCache.HiddenNext!);
-                next_c = _mathEngine.Clone(stepCache.CellNext!);
+                var stepCache = new LstmStepCache
+                {
+                    Input = inputEmbedding, HiddenPrev = cloneHiddenPrev, CellPrev = cloneCellPrev,
+                    ForgetGate = forgetGate, InputGate = inputGate, CellCandidate = cellCandidate,
+                    OutputGate = outputGate, CellNext = cellNext, TanhCellNext = tanhCellNext,
+                    HiddenNext = hiddenNext
+                };
 
-                _tensorPool.Return(stepCache.Input);
-                _tensorPool.Return(stepCache.ForgetGate);
-                _tensorPool.Return(stepCache.InputGate);
-                _tensorPool.Return(stepCache.CellCandidate);
-                _tensorPool.Return(stepCache.OutputGate);
-                _tensorPool.Return(stepCache.CellNext);
-                _tensorPool.Return(stepCache.TanhCellNext);
-                _tensorPool.Return(stepCache.HiddenNext);
+                _cacheManager.CacheStep(stepCache);
 
-                _mathEngine.MatrixMultiply(next_h, weightsHiddenOutputFinal!, outputLinear);
+                _mathEngine.MatrixMultiply(hiddenNext, weightsHiddenOutputFinal!, outputLinear);
                 _mathEngine.AddBroadcast(outputLinear, biasOutputFinal!, outputLinear);
                 _mathEngine.Softmax(outputLinear, outputSoftmax);
-
                 _mathEngine.Set(predictions, t, outputSoftmax);
-                
+
                 h_prev.Dispose();
                 c_prev.Dispose();
-                h_prev = next_h;
-                c_prev = next_c;
+
+                h_prev = _mathEngine.Clone(hiddenNext);
+                c_prev = _mathEngine.Clone(cellNext);
             }
 
             var predData = predictions.ToCpuTensor().GetData();
             var targetData = targets.ToCpuTensor().GetData();
+
             for (int t = 0; t < sequenceLength; t++)
             {
                 int offset = t * outputSize;
                 int targetLocalIndex = Array.IndexOf(targetData, 1.0, offset, outputSize);
                 if (targetLocalIndex != -1)
                 {
-                    double prob = Math.Max(predData[targetLocalIndex], 1e-9);
+                    double prob = Math.Max(predData[offset + targetLocalIndex], 1e-9);
                     sequenceLoss += -Math.Log(prob);
                 }
             }
@@ -355,167 +447,209 @@ public class NeuralNetworkLSTM : IDisposable
             _tensorPool.Return(temp2);
             _tensorPool.Return(outputLinear);
             _tensorPool.Return(outputSoftmax);
-            h_prev.Dispose(); 
-            c_prev.Dispose(); 
+            h_prev?.Dispose();
+            c_prev?.Dispose();
         }
     }
+
+    // ========================================
+// BACKWARD PASS - LIMPEZA TOTAL
+// Libera TODOS os tensores incluindo gradientes
+// ========================================
 
     private Dictionary<string, IMathTensor> BackwardPassGpuOptimized(
         IMathTensor targets, IMathTensor predictions,
         int[] inputIndices, int sequenceLength)
     {
+        // ✅ Inicializa gradientes (15 tensores criados aqui)
         var grads = InitializeGradientsGpu();
 
-        IMathTensor? dh_next = _tensorPool!.Rent(new[] { 1, hiddenSize });
-        IMathTensor? dc_next = _tensorPool.Rent(new[] { 1, hiddenSize });
-        IMathTensor? dy = _tensorPool.Rent(new[] { sequenceLength, outputSize });
-        IMathTensor? d_embedding = _tensorPool.Rent(new[] { 1, weightsEmbedding!.Shape[1] });
-        IMathTensor? current_dy = _tensorPool.Rent(new[] { 1, outputSize });
-        IMathTensor? dh = _tensorPool.Rent(new[] { 1, hiddenSize });
-        IMathTensor? dc = _tensorPool.Rent(new[] { 1, hiddenSize });
-        IMathTensor? dog = _tensorPool.Rent(new[] { 1, hiddenSize });
-        IMathTensor? dfg = _tensorPool.Rent(new[] { 1, hiddenSize });
-        IMathTensor? dig = _tensorPool.Rent(new[] { 1, hiddenSize });
-        IMathTensor? dcc = _tensorPool.Rent(new[] { 1, hiddenSize });
-        IMathTensor? temp_deriv = _tensorPool.Rent(new[] { 1, hiddenSize });
-        IMathTensor? temp_mult = _tensorPool.Rent(new[] { 1, hiddenSize });
-        IMathTensor? temp_grad_why = _tensorPool.Rent(new[] { hiddenSize, outputSize });
-        IMathTensor? temp_grad_w_in = _tensorPool.Rent(new[] { weightsEmbedding.Shape[1], hiddenSize });
-        IMathTensor? temp_grad_w_hid = _tensorPool.Rent(new[] { hiddenSize, hiddenSize });
+        // ✅ Buffers temporários (nullable para garantir limpeza)
+        IMathTensor? dh_next = null;
+        IMathTensor? dc_next = null;
+        IMathTensor? dy = null;
+        IMathTensor? d_embedding = null;
+        IMathTensor? current_dy = null;
+        IMathTensor? dh = null;
+        IMathTensor? dc = null;
+        IMathTensor? dog = null;
+        IMathTensor? dfg = null;
+        IMathTensor? dig = null;
+        IMathTensor? dcc = null;
+        IMathTensor? temp_deriv = null;
+        IMathTensor? temp_mult = null;
+        IMathTensor? temp_grad_why = null;
+        IMathTensor? temp_grad_w_in = null;
+        IMathTensor? temp_grad_w_hid = null;
 
         try
         {
+            // ✅ FASE 1: Aloca TODOS os buffers temporários
+            dh_next = _tensorPool!.Rent(new[] { 1, hiddenSize });
+            dc_next = _tensorPool.Rent(new[] { 1, hiddenSize });
+            dy = _tensorPool.Rent(new[] { sequenceLength, outputSize });
+            d_embedding = _tensorPool.Rent(new[] { 1, weightsEmbedding!.Shape[1] });
+            current_dy = _tensorPool.Rent(new[] { 1, outputSize });
+            dh = _tensorPool.Rent(new[] { 1, hiddenSize });
+            dc = _tensorPool.Rent(new[] { 1, hiddenSize });
+            dog = _tensorPool.Rent(new[] { 1, hiddenSize });
+            dfg = _tensorPool.Rent(new[] { 1, hiddenSize });
+            dig = _tensorPool.Rent(new[] { 1, hiddenSize });
+            dcc = _tensorPool.Rent(new[] { 1, hiddenSize });
+            temp_deriv = _tensorPool.Rent(new[] { 1, hiddenSize });
+            temp_mult = _tensorPool.Rent(new[] { 1, hiddenSize });
+            temp_grad_why = _tensorPool.Rent(new[] { hiddenSize, outputSize });
+            temp_grad_w_in = _tensorPool.Rent(new[] { weightsEmbedding.Shape[1], hiddenSize });
+            temp_grad_w_hid = _tensorPool.Rent(new[] { hiddenSize, hiddenSize });
+
+            // ✅ FASE 2: Calcula gradiente de output (dy)
             _mathEngine.Subtract(predictions, targets, dy);
 
+            // ✅ FASE 3: Loop backward (T-1 → 0)
             for (int t = sequenceLength - 1; t >= 0; t--)
             {
+                // Extrai gradiente de output para este timestep
                 _mathEngine.Slice(dy, t, current_dy);
-                
-                using (var hiddenNext = _cacheManager!.RetrieveTensor(t, "HiddenNext"))
+
+                // ✅ Cache local de timestep (será liberado no finally interno)
+                Dictionary<string, IMathTensor>? timestepCache = null;
+
+                try
                 {
+                    // ✅ Carrega todos os tensores deste timestep DE UMA VEZ
+                    timestepCache = _cacheManager.RetrieveMultipleTensors(t,
+                        DiskOnlyCacheManager.TensorNames.Input,
+                        DiskOnlyCacheManager.TensorNames.HiddenPrev,
+                        DiskOnlyCacheManager.TensorNames.HiddenNext,
+                        DiskOnlyCacheManager.TensorNames.CellPrev,
+                        DiskOnlyCacheManager.TensorNames.CellNext,
+                        DiskOnlyCacheManager.TensorNames.ForgetGate,
+                        DiskOnlyCacheManager.TensorNames.InputGate,
+                        DiskOnlyCacheManager.TensorNames.CellCandidate,
+                        DiskOnlyCacheManager.TensorNames.OutputGate,
+                        DiskOnlyCacheManager.TensorNames.TanhCellNext
+                    );
+
+                    // ✅ Gradiente de Output Final
+                    var hiddenNext = timestepCache[DiskOnlyCacheManager.TensorNames.HiddenNext];
                     _mathEngine.MatrixMultiplyTransposeA(hiddenNext, current_dy, temp_grad_why);
                     _mathEngine.Add(grads["why"], temp_grad_why, grads["why"]);
-                }
+                    _mathEngine.Add(grads["by"], current_dy, grads["by"]);
 
-                _mathEngine.Add(grads["by"], current_dy, grads["by"]);
+                    // ✅ Gradiente de Hidden State
+                    _mathEngine.MatrixMultiplyTransposeB(current_dy, weightsHiddenOutputFinal!, dh);
+                    _mathEngine.Add(dh, dh_next!, dh);
 
-                _mathEngine.MatrixMultiplyTransposeB(current_dy, weightsHiddenOutputFinal!, dh);
-                _mathEngine.Add(dh, dh_next!, dh);
+                    // ✅ Gradiente de Output Gate
+                    var tanhCellNext = timestepCache[DiskOnlyCacheManager.TensorNames.TanhCellNext];
+                    var outputGate = timestepCache[DiskOnlyCacheManager.TensorNames.OutputGate];
 
-                using (var tanhCellNext = _cacheManager!.RetrieveTensor(t, "TanhCellNext"))
-                using (var outputGate = _cacheManager!.RetrieveTensor(t, "OutputGate"))
-                {
                     _mathEngine.Multiply(dh, tanhCellNext, dog);
                     _mathEngine.SigmoidDerivative(outputGate, temp_deriv);
                     _mathEngine.Multiply(dog, temp_deriv, dog);
-                }
 
-                using (var input = _cacheManager!.RetrieveTensor(t, "Input"))
-                using (var hiddenPrev = _cacheManager!.RetrieveTensor(t, "HiddenPrev"))
-                {
+                    // Atualiza pesos do Output Gate
+                    var input = timestepCache[DiskOnlyCacheManager.TensorNames.Input];
+                    var hiddenPrev = timestepCache[DiskOnlyCacheManager.TensorNames.HiddenPrev];
+
                     _mathEngine.MatrixMultiplyTransposeA(input, dog, temp_grad_w_in);
                     _mathEngine.Add(grads["wio"], temp_grad_w_in, grads["wio"]);
                     _mathEngine.MatrixMultiplyTransposeA(hiddenPrev, dog, temp_grad_w_hid);
                     _mathEngine.Add(grads["who"], temp_grad_w_hid, grads["who"]);
-                }
+                    _mathEngine.Add(grads["bo"], dog, grads["bo"]);
 
-                _mathEngine.Add(grads["bo"], dog, grads["bo"]);
-
-                _mathEngine.Clone(dc_next!);
-                using (var outputGate = _cacheManager!.RetrieveTensor(t, "OutputGate"))
-                using (var tanhCellNext = _cacheManager!.RetrieveTensor(t, "TanhCellNext"))
-                {
+                    // ✅ Gradiente de Cell State
                     _mathEngine.Multiply(dh, outputGate, temp_mult);
                     _mathEngine.TanhDerivative(tanhCellNext, temp_deriv);
                     _mathEngine.Multiply(temp_mult, temp_deriv, temp_mult);
-                    _mathEngine.Add(dc, temp_mult, dc);
-                }
+                    _mathEngine.Add(dc_next!, temp_mult, dc);
 
-                using (var cellPrev = _cacheManager!.RetrieveTensor(t, "CellPrev"))
-                using (var forgetGate = _cacheManager!.RetrieveTensor(t, "ForgetGate"))
-                {
+                    // ✅ Gradiente de Forget Gate
+                    var cellPrev = timestepCache[DiskOnlyCacheManager.TensorNames.CellPrev];
+                    var forgetGate = timestepCache[DiskOnlyCacheManager.TensorNames.ForgetGate];
+
                     _mathEngine.Multiply(dc, cellPrev, dfg);
                     _mathEngine.SigmoidDerivative(forgetGate, temp_deriv);
                     _mathEngine.Multiply(dfg, temp_deriv, dfg);
-                }
-                
-                using (var input = _cacheManager!.RetrieveTensor(t, "Input"))
-                using (var hiddenPrev = _cacheManager!.RetrieveTensor(t, "HiddenPrev"))
-                {
+
                     _mathEngine.MatrixMultiplyTransposeA(input, dfg, temp_grad_w_in);
                     _mathEngine.Add(grads["wif"], temp_grad_w_in, grads["wif"]);
                     _mathEngine.MatrixMultiplyTransposeA(hiddenPrev, dfg, temp_grad_w_hid);
                     _mathEngine.Add(grads["whf"], temp_grad_w_hid, grads["whf"]);
-                }
-                _mathEngine.Add(grads["bf"], dfg, grads["bf"]);
+                    _mathEngine.Add(grads["bf"], dfg, grads["bf"]);
 
-                using (var cellCandidate = _cacheManager!.RetrieveTensor(t, "CellCandidate"))
-                using (var inputGate = _cacheManager!.RetrieveTensor(t, "InputGate"))
-                {
-                     _mathEngine.Multiply(dc, cellCandidate, dig);
+                    // ✅ Gradiente de Input Gate
+                    var cellCandidate = timestepCache[DiskOnlyCacheManager.TensorNames.CellCandidate];
+                    var inputGate = timestepCache[DiskOnlyCacheManager.TensorNames.InputGate];
+
+                    _mathEngine.Multiply(dc, cellCandidate, dig);
                     _mathEngine.SigmoidDerivative(inputGate, temp_deriv);
                     _mathEngine.Multiply(dig, temp_deriv, dig);
-                }
-                
-                using (var input = _cacheManager!.RetrieveTensor(t, "Input"))
-                using (var hiddenPrev = _cacheManager!.RetrieveTensor(t, "HiddenPrev"))
-                {
-                     _mathEngine.MatrixMultiplyTransposeA(input, dig, temp_grad_w_in);
+
+                    _mathEngine.MatrixMultiplyTransposeA(input, dig, temp_grad_w_in);
                     _mathEngine.Add(grads["wii"], temp_grad_w_in, grads["wii"]);
                     _mathEngine.MatrixMultiplyTransposeA(hiddenPrev, dig, temp_grad_w_hid);
                     _mathEngine.Add(grads["whi"], temp_grad_w_hid, grads["whi"]);
-                }
-                _mathEngine.Add(grads["bi"], dig, grads["bi"]);
-                
-                using (var inputGate = _cacheManager!.RetrieveTensor(t, "InputGate"))
-                using (var cellCandidate = _cacheManager!.RetrieveTensor(t, "CellCandidate"))
-                {
+                    _mathEngine.Add(grads["bi"], dig, grads["bi"]);
+
+                    // ✅ Gradiente de Cell Candidate
                     _mathEngine.Multiply(dc, inputGate, dcc);
                     _mathEngine.TanhDerivative(cellCandidate, temp_deriv);
                     _mathEngine.Multiply(dcc, temp_deriv, dcc);
-                }
-               
-                using (var input = _cacheManager!.RetrieveTensor(t, "Input"))
-                using (var hiddenPrev = _cacheManager!.RetrieveTensor(t, "HiddenPrev"))
-                {
-                     _mathEngine.MatrixMultiplyTransposeA(input, dcc, temp_grad_w_in);
+
+                    _mathEngine.MatrixMultiplyTransposeA(input, dcc, temp_grad_w_in);
                     _mathEngine.Add(grads["wic"], temp_grad_w_in, grads["wic"]);
                     _mathEngine.MatrixMultiplyTransposeA(hiddenPrev, dcc, temp_grad_w_hid);
                     _mathEngine.Add(grads["whc"], temp_grad_w_hid, grads["whc"]);
-                }
-                _mathEngine.Add(grads["bc"], dcc, grads["bc"]);
+                    _mathEngine.Add(grads["bc"], dcc, grads["bc"]);
 
-                _mathEngine.MatrixMultiplyTransposeB(dfg, weightsInputForget!, d_embedding);
-                _mathEngine.MatrixMultiplyTransposeB(dig, weightsInputInput!, temp_mult);
-                _mathEngine.Add(d_embedding, temp_mult, d_embedding);
-                _mathEngine.MatrixMultiplyTransposeB(dcc, weightsInputCell!, temp_mult);
-                _mathEngine.Add(d_embedding, temp_mult, d_embedding);
-                _mathEngine.MatrixMultiplyTransposeB(dog, weightsInputOutput!, temp_mult);
-                _mathEngine.Add(d_embedding, temp_mult, d_embedding);
+                    // ✅ Gradiente de Embedding
+                    _mathEngine.MatrixMultiplyTransposeB(dfg, weightsInputForget!, d_embedding);
+                    _mathEngine.MatrixMultiplyTransposeB(dig, weightsInputInput!, temp_mult);
+                    _mathEngine.Add(d_embedding, temp_mult, d_embedding);
+                    _mathEngine.MatrixMultiplyTransposeB(dcc, weightsInputCell!, temp_mult);
+                    _mathEngine.Add(d_embedding, temp_mult, d_embedding);
+                    _mathEngine.MatrixMultiplyTransposeB(dog, weightsInputOutput!, temp_mult);
+                    _mathEngine.Add(d_embedding, temp_mult, d_embedding);
 
-                _mathEngine.AccumulateGradient(grads["w_embed"], d_embedding, inputIndices[t]);
+                    _mathEngine.AccumulateGradient(grads["w_embed"], d_embedding, inputIndices[t]);
 
-                _mathEngine.MatrixMultiplyTransposeB(dfg, weightsHiddenForget!, dh_next!);
-                _mathEngine.MatrixMultiplyTransposeB(dig, weightsHiddenInput!, temp_mult);
-                _mathEngine.Add(dh_next!, temp_mult, dh_next!);
-                _mathEngine.MatrixMultiplyTransposeB(dcc, weightsHiddenCell!, temp_mult);
-                _mathEngine.Add(dh_next!, temp_mult, dh_next!);
-                _mathEngine.MatrixMultiplyTransposeB(dog, weightsHiddenOutput!, temp_mult);
-                _mathEngine.Add(dh_next!, temp_mult, dh_next!);
-                
-                using (var forgetGate = _cacheManager!.RetrieveTensor(t, "ForgetGate"))
-                {
+                    // ✅ Propaga gradientes para timestep anterior
+                    _mathEngine.MatrixMultiplyTransposeB(dfg, weightsHiddenForget!, dh_next!);
+                    _mathEngine.MatrixMultiplyTransposeB(dig, weightsHiddenInput!, temp_mult);
+                    _mathEngine.Add(dh_next!, temp_mult, dh_next!);
+                    _mathEngine.MatrixMultiplyTransposeB(dcc, weightsHiddenCell!, temp_mult);
+                    _mathEngine.Add(dh_next!, temp_mult, dh_next!);
+                    _mathEngine.MatrixMultiplyTransposeB(dog, weightsHiddenOutput!, temp_mult);
+                    _mathEngine.Add(dh_next!, temp_mult, dh_next!);
+
                     _mathEngine.Multiply(dc, forgetGate, dc_next!);
+                }
+                finally
+                {
+                    // ✅ CRÍTICO: Libera tensores do timestep
+                    if (timestepCache != null)
+                    {
+                        foreach (var tensor in timestepCache.Values)
+                        {
+                            tensor?.Dispose();
+                        }
+
+                        timestepCache.Clear();
+                    }
                 }
             }
 
+            // ✅ FASE 4: Gradient Clipping
             double totalNorm = 0;
             foreach (var grad in grads.Values)
             {
-                totalNorm += grad.ToCpuTensor().GetData().Sum(x => x * x);
+                var gradData = grad.ToCpuTensor().GetData();
+                totalNorm += gradData.Sum(x => x * x);
             }
 
             totalNorm = Math.Sqrt(totalNorm);
+
             const double MAX_GRAD_NORM = 5.0;
             if (totalNorm > MAX_GRAD_NORM)
             {
@@ -526,26 +660,56 @@ public class NeuralNetworkLSTM : IDisposable
                 }
             }
 
+            // ✅ FASE 5: Retorna gradientes
+            // ATENÇÃO: O chamador (TrainSequence) DEVE fazer Dispose destes gradientes!
             return grads;
+        }
+        catch (Exception ex)
+        {
+            // ✅ EM CASO DE EXCEÇÃO: Libera gradientes para evitar vazamento
+            Console.WriteLine($"[ERRO] BackwardPass falhou: {ex.Message}");
+
+            // Libera gradientes criados
+            if (grads != null)
+            {
+                foreach (var grad in grads.Values)
+                {
+                    try
+                    {
+                        grad?.Dispose();
+                    }
+                    catch
+                    {
+                    }
+                }
+
+                grads.Clear();
+            }
+
+            throw;
         }
         finally
         {
-            _tensorPool.Return(dh_next!);
-            _tensorPool.Return(dc_next!);
-            _tensorPool.Return(dy);
-            _tensorPool.Return(d_embedding);
-            _tensorPool.Return(current_dy);
-            _tensorPool.Return(dh);
-            _tensorPool.Return(dc);
-            _tensorPool.Return(dog);
-            _tensorPool.Return(dfg);
-            _tensorPool.Return(dig);
-            _tensorPool.Return(dcc);
-            _tensorPool.Return(temp_deriv);
-            _tensorPool.Return(temp_mult);
-            _tensorPool.Return(temp_grad_why);
-            _tensorPool.Return(temp_grad_w_in);
-            _tensorPool.Return(temp_grad_w_hid);
+            // ✅ GARANTIA: Retorna TODOS os buffers temporários ao pool
+            if (dh_next != null) _tensorPool.Return(dh_next);
+            if (dc_next != null) _tensorPool.Return(dc_next);
+            if (dy != null) _tensorPool.Return(dy);
+            if (d_embedding != null) _tensorPool.Return(d_embedding);
+            if (current_dy != null) _tensorPool.Return(current_dy);
+            if (dh != null) _tensorPool.Return(dh);
+            if (dc != null) _tensorPool.Return(dc);
+            if (dog != null) _tensorPool.Return(dog);
+            if (dfg != null) _tensorPool.Return(dfg);
+            if (dig != null) _tensorPool.Return(dig);
+            if (dcc != null) _tensorPool.Return(dcc);
+            if (temp_deriv != null) _tensorPool.Return(temp_deriv);
+            if (temp_mult != null) _tensorPool.Return(temp_mult);
+            if (temp_grad_why != null) _tensorPool.Return(temp_grad_why);
+            if (temp_grad_w_in != null) _tensorPool.Return(temp_grad_w_in);
+            if (temp_grad_w_hid != null) _tensorPool.Return(temp_grad_w_hid);
+
+            // ⚠️ ATENÇÃO: NÃO liberamos 'grads' aqui porque será usado em UpdateWeights!
+            // O chamador (TrainSequence) é responsável por liberar após uso.
         }
     }
 
@@ -553,33 +717,69 @@ public class NeuralNetworkLSTM : IDisposable
     {
         var parameters = new Dictionary<string, IMathTensor>
         {
-            { "w_embed", weightsEmbedding! },
-            { "wif", weightsInputForget! }, { "whf", weightsHiddenForget! }, { "wii", weightsInputInput! },
-            { "whi", weightsHiddenInput! }, { "wic", weightsInputCell! }, { "whc", weightsHiddenCell! },
-            { "wio", weightsInputOutput! }, { "who", weightsHiddenOutput! }, { "why", weightsHiddenOutputFinal! },
-            { "bf", biasForget! }, { "bi", biasInput! }, { "bc", biasCell! }, { "bo", biasOutput! },
-            { "by", biasOutputFinal! }
+            { "w_embed", weightsEmbedding! }, { "wif", weightsInputForget! }, { "whf", weightsHiddenForget! },
+            { "wii", weightsInputInput! }, { "whi", weightsHiddenInput! }, { "wic", weightsInputCell! },
+            { "whc", weightsHiddenCell! }, { "wio", weightsInputOutput! }, { "who", weightsHiddenOutput! },
+            { "why", weightsHiddenOutputFinal! }, { "bf", biasForget! }, { "bi", biasInput! },
+            { "bc", biasCell! }, { "bo", biasOutput! }, { "by", biasOutputFinal! }
         };
 
         int layerId = 0;
-        foreach (var key in parameters.Keys.Where(gradients.ContainsKey))
+        double[]? paramData = null;
+        double[]? gradData = null;
+
+        try
         {
-            var paramTensor = parameters[key];
-            var gradTensor = gradients[key];
-            var paramData = paramTensor.ToCpuTensor().GetData();
-            var gradData = gradTensor.ToCpuTensor().GetData();
-            _adamOptimizer.UpdateParameters(layerId, paramData, gradData);
-            paramTensor.UpdateFromCpu(paramData);
-            layerId++;
+            foreach (var key in parameters.Keys.Where(gradients.ContainsKey))
+            {
+                var paramTensor = parameters[key];
+                var gradTensor = gradients[key];
+
+                paramData = paramTensor.ToCpuTensor().GetData();
+                gradData = gradTensor.ToCpuTensor().GetData();
+
+                if (paramData.Length != gradData.Length)
+                {
+                    throw new InvalidOperationException(
+                        $"Incompatibilidade de tamanho em '{key}': Param={paramData.Length}, Grad={gradData.Length}");
+                }
+
+                _adamOptimizer.UpdateParameters(layerId, paramData, gradData);
+                paramTensor.UpdateFromCpu(paramData);
+
+                paramData = null;
+                gradData = null;
+                layerId++;
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[ERRO] UpdateWeights falhou na layer {layerId}: {ex.Message}");
+            throw;
+        }
+        finally
+        {
+            paramData = null;
+            gradData = null;
+            GC.Collect(0, GCCollectionMode.Optimized, false);
         }
     }
+
+    // ========================================
+// INITIALIZE GRADIENTS GPU - AUDITORIA
+// ========================================
 
     private Dictionary<string, IMathTensor> InitializeGradientsGpu()
     {
         int embeddingSize = weightsEmbedding!.Shape[1];
-        return new Dictionary<string, IMathTensor>
+
+        // ✅ Cria dicionário com 15 tensores
+        var gradients = new Dictionary<string, IMathTensor>
         {
+            // ✅ Embedding (maior tensor: vocabSize × embeddingSize)
             { "w_embed", _mathEngine.CreateTensor(new[] { inputSize, embeddingSize }) },
+
+            // ✅ LSTM Weights - Input Gates (8 tensores)
             { "wif", _mathEngine.CreateTensor(new[] { embeddingSize, hiddenSize }) },
             { "whf", _mathEngine.CreateTensor(new[] { hiddenSize, hiddenSize }) },
             { "wii", _mathEngine.CreateTensor(new[] { embeddingSize, hiddenSize }) },
@@ -588,13 +788,79 @@ public class NeuralNetworkLSTM : IDisposable
             { "whc", _mathEngine.CreateTensor(new[] { hiddenSize, hiddenSize }) },
             { "wio", _mathEngine.CreateTensor(new[] { embeddingSize, hiddenSize }) },
             { "who", _mathEngine.CreateTensor(new[] { hiddenSize, hiddenSize }) },
+
+            // ✅ Output Layer (segundo maior tensor: hiddenSize × outputSize)
             { "why", _mathEngine.CreateTensor(new[] { hiddenSize, outputSize }) },
+
+            // ✅ Biases (5 tensores pequenos)
             { "bf", _mathEngine.CreateTensor(new[] { 1, hiddenSize }) },
             { "bi", _mathEngine.CreateTensor(new[] { 1, hiddenSize }) },
             { "bc", _mathEngine.CreateTensor(new[] { 1, hiddenSize }) },
             { "bo", _mathEngine.CreateTensor(new[] { 1, hiddenSize }) },
             { "by", _mathEngine.CreateTensor(new[] { 1, outputSize }) }
         };
+
+        // ⚠️ AVISO CRÍTICO:
+        // Estes 15 tensores DEVEM ser liberados após uso!
+        // O chamador (BackwardPass) retorna este dicionário,
+        // e quem recebe (TrainSequence) DEVE fazer Dispose de TODOS.
+
+        return gradients;
+    }
+// ========================================
+// CÁLCULO DE MEMÓRIA DOS GRADIENTES
+// ========================================
+
+    private long CalculateGradientsMemoryMB()
+    {
+        int embeddingSize = weightsEmbedding!.Shape[1];
+        long totalParams = 0;
+
+        // Embedding
+        totalParams += inputSize * embeddingSize;
+
+        // LSTM Weights (4 gates × 2 tipos)
+        totalParams += 4 * embeddingSize * hiddenSize; // Input weights
+        totalParams += 4 * hiddenSize * hiddenSize; // Hidden weights
+
+        // Output Layer
+        totalParams += hiddenSize * outputSize;
+
+        // Biases
+        totalParams += 4 * hiddenSize; // LSTM biases
+        totalParams += outputSize; // Output bias
+
+        // Cada parâmetro: 8 bytes (double)
+        long totalBytes = totalParams * sizeof(double);
+        long totalMB = totalBytes / (1024 * 1024);
+
+        return totalMB;
+    }
+// ========================================
+// MÉTODO AUXILIAR: Libera Gradientes
+// ========================================
+
+    /// <summary>
+    /// Libera TODOS os tensores de um dicionário de gradientes.
+    /// Use este método para garantir que nenhum tensor fique órfão.
+    /// </summary>
+    private void DisposeGradients(Dictionary<string, IMathTensor>? gradients)
+    {
+        if (gradients == null) return;
+
+        foreach (var kvp in gradients)
+        {
+            try
+            {
+                kvp.Value?.Dispose();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[AVISO] Erro ao liberar gradiente '{kvp.Key}': {ex.Message}");
+            }
+        }
+
+        gradients.Clear();
     }
 
     private IMathTensor CreateSequenceTensor(Tensor[] sequence)
@@ -611,38 +877,13 @@ public class NeuralNetworkLSTM : IDisposable
         return _mathEngine.CreateTensor(flatData, new[] { sequenceLength, featureSize });
     }
 
-    public void Dispose()
+    public double CalculateSequenceLoss(int[] inputIndices, Tensor[] targets)
     {
-        Dispose(true);
-        GC.SuppressFinalize(this);
-    }
-
-    protected virtual void Dispose(bool disposing)
-    {
-        if (_disposed) return;
-        if (disposing)
-        {
-            _cacheManager?.Dispose();
-            weightsEmbedding?.Dispose();
-            weightsInputForget?.Dispose();
-            weightsHiddenForget?.Dispose();
-            weightsInputInput?.Dispose();
-            weightsHiddenInput?.Dispose();
-            weightsInputCell?.Dispose();
-            weightsHiddenCell?.Dispose();
-            weightsInputOutput?.Dispose();
-            weightsHiddenOutput?.Dispose();
-            biasForget?.Dispose();
-            biasInput?.Dispose();
-            biasCell?.Dispose();
-            biasOutput?.Dispose();
-            weightsHiddenOutputFinal?.Dispose();
-            biasOutputFinal?.Dispose();
-            hiddenState?.Dispose();
-            cellState?.Dispose();
-            _tensorPool?.Dispose();
-        }
-        _disposed = true;
+        _cacheManager.Reset();
+        using var targetsGpu = CreateSequenceTensor(targets);
+        var (predictions, loss) = ForwardPassGpuOptimized(inputIndices, targetsGpu, inputIndices.Length);
+        predictions.Dispose();
+        return loss;
     }
 
     public void SaveModel(string filePath)
@@ -696,7 +937,8 @@ public class NeuralNetworkLSTM : IDisposable
             var bi = mathEngine.CreateTensor(modelData.BiasInput.data, modelData.BiasInput.shape);
             var bc = mathEngine.CreateTensor(modelData.BiasCell.data, modelData.BiasCell.shape);
             var bo = mathEngine.CreateTensor(modelData.BiasOutput.data, modelData.BiasOutput.shape);
-            var why = mathEngine.CreateTensor(modelData.WeightsHiddenOutputFinal.data, modelData.WeightsHiddenOutputFinal.shape);
+            var why = mathEngine.CreateTensor(modelData.WeightsHiddenOutputFinal.data,
+                modelData.WeightsHiddenOutputFinal.shape);
             var by = mathEngine.CreateTensor(modelData.BiasOutputFinal.data, modelData.BiasOutputFinal.shape);
 
             return new NeuralNetworkLSTM(
@@ -711,17 +953,38 @@ public class NeuralNetworkLSTM : IDisposable
         }
     }
 
-    public double CalculateSequenceLoss(int[] inputIndices, Tensor[] targets)
+    protected virtual void Dispose(bool disposing)
     {
-        _cacheManager?.Dispose();
-        _cacheManager = new HybridLstmCacheManager(_mathEngine, weightsEmbedding!.Shape[1], hiddenSize, inputIndices.Length);
-        
-        using var targetsGpu = CreateSequenceTensor(targets);
-        
-        var (predictions, loss) = ForwardPassGpuOptimized(inputIndices, targetsGpu, inputIndices.Length);
-        
-        predictions.Dispose();
+        if (_disposed) return;
+        if (disposing)
+        {
+            _cacheManager?.Dispose();
+            weightsEmbedding?.Dispose();
+            weightsInputForget?.Dispose();
+            weightsHiddenForget?.Dispose();
+            weightsInputInput?.Dispose();
+            weightsHiddenInput?.Dispose();
+            weightsInputCell?.Dispose();
+            weightsHiddenCell?.Dispose();
+            weightsInputOutput?.Dispose();
+            weightsHiddenOutput?.Dispose();
+            biasForget?.Dispose();
+            biasInput?.Dispose();
+            biasCell?.Dispose();
+            biasOutput?.Dispose();
+            weightsHiddenOutputFinal?.Dispose();
+            biasOutputFinal?.Dispose();
+            hiddenState?.Dispose();
+            cellState?.Dispose();
+            _tensorPool?.Dispose();
+        }
 
-        return loss;
+        _disposed = true;
+    }
+
+    public void Dispose()
+    {
+        Dispose(true);
+        GC.SuppressFinalize(this);
     }
 }
