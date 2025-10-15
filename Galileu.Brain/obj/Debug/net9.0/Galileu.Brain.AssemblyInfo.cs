@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("Galileu.Brain")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+bf71250805ccbcfedcb5944388af3b54678da5f4")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+21a982712cdafb385d21b923612784ce98ffa5e2")]
 [assembly: System.Reflection.AssemblyProductAttribute("Galileu.Brain")]
 [assembly: System.Reflection.AssemblyTitleAttribute("Galileu.Brain")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
