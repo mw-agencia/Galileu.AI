@@ -121,7 +121,7 @@ async Task BootstrapNodeAsync(IServiceProvider services, string[] args)
 
     var _generativeService = services.GetRequiredService<GenerativeService>();
     string modelPath = Path.Combine(Environment.CurrentDirectory, "Dayson", "Dayson.json");
-    var datasetPath = Path.Combine(Environment.CurrentDirectory, "Dayson", "pt_0.txt");
+    var datasetPath = Path.Combine(Environment.CurrentDirectory, "Dayson", "code.txt");
 
     if (!File.Exists(modelPath))
     {

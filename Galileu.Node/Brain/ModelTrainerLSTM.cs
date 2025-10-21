@@ -65,7 +65,7 @@ public class ModelTrainerLSTM
             {
                 _stopwatch.Restart();
                 Console.WriteLine($"\n{'═',60}");
-                Console.WriteLine($"ÉPOCA {epoch + 1}/{epochs} >> {DateTime.UtcNow}");
+                Console.WriteLine($"ÉPOCA {epoch + 1}/{epochs} >> Learning Rate: {learningRate} >> {DateTime.UtcNow}");
                 Console.WriteLine($"{'═',60}");
 
                 double totalEpochLoss = 0;

@@ -25,6 +25,13 @@ public class VocabularyManager
             Console.WriteLine($"[VocabularyManager] ERRO: Arquivo de dataset não encontrado: {datasetPath}");
             return 0;
         }
+        
+        if (File.Exists(VocabFilePath))
+        {
+            Console.WriteLine($"[VocabularyManager] ReConstruindo o vocabulário encontrado: {VocabFilePath}");
+            return LoadVocabulary();
+        }
+        
 
         Console.WriteLine($"[VocabularyManager] Construindo vocabulário (máx: {maxVocabSize} tokens)...");
         

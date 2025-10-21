@@ -4,6 +4,7 @@ namespace Galileu.Node.Brain;
 
 public class NeuralNetworkModelDataEmbeddingLSTM
 {
+    
     // Hiperparâmetros da arquitetura
     public int VocabSize { get; set; }
     public int EmbeddingSize { get; set; }
@@ -26,4 +27,9 @@ public class NeuralNetworkModelDataEmbeddingLSTM
     public TensorData BiasOutput { get; set; }
     public TensorData WeightsHiddenOutputFinal { get; set; }
     public TensorData BiasOutputFinal { get; set; }
+    
+    // 🔥 NOVO: Propriedades para o estado do otimizador Adam
+    public Dictionary<int, TensorData>? OptimizerM { get; set; }
+    public Dictionary<int, TensorData>? OptimizerV { get; set; }
+    public Dictionary<int, int>? OptimizerT { get; set; }
 }
